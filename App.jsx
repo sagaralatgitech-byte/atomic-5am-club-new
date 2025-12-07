@@ -30,7 +30,7 @@ const storage = {
 function App() {
   const [activeTab, setActiveTab] = useState('morning');
   const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   // Morning 20/20/20 Routine
