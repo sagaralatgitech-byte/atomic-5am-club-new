@@ -1,14 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Calendar, CheckCircle, Circle, TrendingUp, Award, Sun, 
   Heart, Target, Plus, Trash2, Clock, Download, AlertCircle, 
   Book, Menu, X
 } from 'lucide-react';
 
-// Storage wrapper for localStorage
+// Storage wrapper for localStorage with error handling
 const storage = {
   async get(key) {
     try {
+      if (typeof window === 'undefined' || !window.localStorage) {
+        console.warn('localStorage not available');
+        return null;
+      }
       const value = localStorage.getItem(key);
       return value ? { value } : null;
     } catch (error) {
@@ -18,10 +22,19 @@ const storage = {
   },
   async set(key, value) {
     try {
+      if (typeof window === 'undefined' || !window.localStorage) {
+        console.warn('localStorage not available');
+        return null;
+      }
       localStorage.setItem(key, value);
       return { key, value };
     } catch (error) {
       console.error('Storage set error:', error);
+      // Check if quota exceeded
+      if (error.name === 'QuotaExceededError') {
+        console.warn('localStorage quota exceeded - clearing old data');
+        // Could implement cleanup logic here
+      }
       return null;
     }
   }
@@ -30,8 +43,10 @@ const storage = {
 function App() {
   const [activeTab, setActiveTab] = useState('morning');
   const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [loading, setLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  
+  // START WITH LOADING = FALSE for immediate render on Vercel
+  const [dataLoaded, setDataLoaded] = useState(false);
   
   // Morning 20/20/20 Routine
   const [morningRoutine, setMorningRoutine] = useState({
@@ -98,59 +113,70 @@ function App() {
     { id: 1, trigger: 'After I wake up', newHabit: 'I will drink a glass of water', completed: false }
   ]);
 
-  // Load data on mount and date change
+  // Load data in background without blocking render
   useEffect(() => {
-    loadData();
+    const loadData = async () => {
+      try {
+        const dateKey = `data-${currentDate}`;
+        const result = await storage.get(dateKey);
+        
+        if (result && result.value) {
+          const data = JSON.parse(result.value);
+          if (data.morningRoutine) setMorningRoutine(data.morningRoutine);
+          if (data.gratitude) setGratitude(data.gratitude);
+          if (data.habits) setHabits(data.habits);
+          if (data.tasks) setTasks(data.tasks);
+          if (data.timeBlocks) setTimeBlocks(data.timeBlocks);
+          if (data.dailyFive) setDailyFive(data.dailyFive);
+        }
+        
+        // Load persistent data
+        const statsResult = await storage.get('stats');
+        if (statsResult && statsResult.value) {
+          setStats(JSON.parse(statsResult.value));
+        }
+        
+        const weekResult = await storage.get('weekly-goals');
+        if (weekResult && weekResult.value) {
+          setWeeklyGoals(JSON.parse(weekResult.value));
+        }
+
+        const identityResult = await storage.get('identity');
+        if (identityResult && identityResult.value) {
+          setIdentity(JSON.parse(identityResult.value));
+        }
+
+        const stacksResult = await storage.get('habit-stacks');
+        if (stacksResult && stacksResult.value) {
+          setHabitStacks(JSON.parse(stacksResult.value));
+        }
+        
+        setDataLoaded(true);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        // Even if load fails, mark as loaded so app displays
+        setDataLoaded(true);
+      }
+    };
+
+    // Small delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      loadData();
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, [currentDate]);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const dateKey = `data-${currentDate}`;
-      const result = await storage.get(dateKey);
-      
-      if (result && result.value) {
-        const data = JSON.parse(result.value);
-        setMorningRoutine(data.morningRoutine || morningRoutine);
-        setGratitude(data.gratitude || ['', '', '']);
-        setHabits(data.habits || habits);
-        setTasks(data.tasks || []);
-        setTimeBlocks(data.timeBlocks || timeBlocks);
-        setDailyFive(data.dailyFive || ['', '', '', '', '']);
-      }
-      
-      const statsResult = await storage.get('stats');
-      if (statsResult && statsResult.value) {
-        setStats(JSON.parse(statsResult.value));
-      }
-      
-      const weekResult = await storage.get('weekly-goals');
-      if (weekResult && weekResult.value) {
-        setWeeklyGoals(JSON.parse(weekResult.value));
-      }
-
-      const identityResult = await storage.get('identity');
-      if (identityResult && identityResult.value) {
-        setIdentity(JSON.parse(identityResult.value));
-      }
-
-      const stacksResult = await storage.get('habit-stacks');
-      if (stacksResult && stacksResult.value) {
-        setHabitStacks(JSON.parse(stacksResult.value));
-      }
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Auto-save data
+  // Auto-save data with debounce
   useEffect(() => {
-    if (!loading) {
+    if (!dataLoaded) return; // Don't save during initial load
+    
+    const timeoutId = setTimeout(() => {
       saveData();
-    }
-  }, [morningRoutine, gratitude, habits, tasks, stats, weeklyGoals, identity, habitStacks, timeBlocks, dailyFive]);
+    }, 1000); // 1 second debounce
+    
+    return () => clearTimeout(timeoutId);
+  }, [morningRoutine, gratitude, habits, tasks, stats, weeklyGoals, identity, habitStacks, timeBlocks, dailyFive, dataLoaded]);
 
   const saveData = async () => {
     try {
@@ -166,60 +192,118 @@ function App() {
         savedAt: new Date().toISOString()
       };
       
-      await storage.set(dateKey, JSON.stringify(data));
-      await storage.set('stats', JSON.stringify(stats));
-      await storage.set('weekly-goals', JSON.stringify(weeklyGoals));
-      await storage.set('identity', JSON.stringify(identity));
-      await storage.set('habit-stacks', JSON.stringify(habitStacks));
+      await Promise.all([
+        storage.set(dateKey, JSON.stringify(data)),
+        storage.set('stats', JSON.stringify(stats)),
+        storage.set('weekly-goals', JSON.stringify(weeklyGoals)),
+        storage.set('identity', JSON.stringify(identity)),
+        storage.set('habit-stacks', JSON.stringify(habitStacks))
+      ]);
     } catch (error) {
       console.error('Error saving data:', error);
+      // Don't throw - we don't want to break the app if save fails
     }
   };
 
   const exportToGoogleCalendar = () => {
     try {
-      let icsContent = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Atomic 5 AM Club//EN\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n';
+      // Create properly formatted .ics content
+      let icsContent = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Atomic 5 AM Club//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'X-WR-CALNAME:Atomic 5 AM Club Schedule',
+        'X-WR-TIMEZONE:UTC'
+      ].join('\r\n') + '\r\n';
       
+      const dateStr = currentDate.replace(/-/g, '');
+      let hasEvents = false;
+      
+      // Add Victory Hour
       if (morningRoutine.move.activity || morningRoutine.reflect.activity || morningRoutine.grow.activity) {
-        const date = currentDate.replace(/-/g, '');
-        const description = `MOVE: ${morningRoutine.move.activity || 'Not specified'}\\nREFLECT: ${morningRoutine.reflect.activity || 'Not specified'}\\nGROW: ${morningRoutine.grow.activity || 'Not specified'}`;
+        hasEvents = true;
+        const description = [
+          `MOVE: ${morningRoutine.move.activity || 'Not specified'}`,
+          `REFLECT: ${morningRoutine.reflect.activity || 'Not specified'}`,
+          `GROW: ${morningRoutine.grow.activity || 'Not specified'}`
+        ].join('\\n');
         
-        icsContent += 'BEGIN:VEVENT\n';
-        icsContent += `DTSTART:${date}T050000\n`;
-        icsContent += `DTEND:${date}T060000\n`;
-        icsContent += `SUMMARY:Victory Hour - 20/20/20 Formula\n`;
-        icsContent += `DESCRIPTION:${description}\n`;
-        icsContent += `UID:victory-hour-${date}@atomic5amclub\n`;
-        icsContent += 'BEGIN:VALARM\nTRIGGER:-PT15M\nACTION:DISPLAY\nDESCRIPTION:Victory Hour starts in 15 minutes!\nEND:VALARM\nEND:VEVENT\n';
+        icsContent += [
+          'BEGIN:VEVENT',
+          `DTSTART:${dateStr}T050000`,
+          `DTEND:${dateStr}T060000`,
+          `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
+          `UID:victory-hour-${dateStr}@atomic5amclub.app`,
+          'SUMMARY:Victory Hour - 20/20/20 Formula',
+          `DESCRIPTION:${description}`,
+          'STATUS:CONFIRMED',
+          'SEQUENCE:0',
+          'BEGIN:VALARM',
+          'TRIGGER:-PT15M',
+          'ACTION:DISPLAY',
+          'DESCRIPTION:Victory Hour starts in 15 minutes!',
+          'END:VALARM',
+          'END:VEVENT'
+        ].join('\r\n') + '\r\n';
       }
       
+      // Add time blocks
       timeBlocks.forEach((block) => {
         if (block.activity && block.time) {
-          const date = currentDate.replace(/-/g, '');
           const timeMatch = block.time.match(/(\d+):(\d+)\s*(AM|PM)/i);
           
           if (timeMatch) {
+            hasEvents = true;
             let [, hours, minutes, period] = timeMatch;
             hours = parseInt(hours);
+            
+            // Convert to 24-hour format
             if (period.toUpperCase() === 'PM' && hours !== 12) hours += 12;
             if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
             
-            const startTime = `${date}T${hours.toString().padStart(2, '0')}${minutes}00`;
-            const endHour = hours + Math.floor(block.duration / 60);
-            const endMinutes = (parseInt(minutes) + (block.duration % 60)).toString().padStart(2, '0');
-            const endTime = `${date}T${endHour.toString().padStart(2, '0')}${endMinutes}00`;
+            const startTime = `${dateStr}T${hours.toString().padStart(2, '0')}${minutes}00`;
             
-            icsContent += 'BEGIN:VEVENT\n';
-            icsContent += `DTSTART:${startTime}\nDTEND:${endTime}\nSUMMARY:${block.activity}\n`;
-            icsContent += `DESCRIPTION:${block.category.toUpperCase()} - ${block.duration} minutes\n`;
-            icsContent += `UID:${block.id}-${date}@atomic5amclub\n`;
-            icsContent += 'BEGIN:VALARM\nTRIGGER:-PT10M\nACTION:DISPLAY\nDESCRIPTION:${block.activity} starts in 10 minutes!\nEND:VALARM\nEND:VEVENT\n';
+            // Calculate end time
+            const totalMinutes = hours * 60 + parseInt(minutes) + block.duration;
+            const endHour = Math.floor(totalMinutes / 60);
+            const endMin = totalMinutes % 60;
+            const endTime = `${dateStr}T${endHour.toString().padStart(2, '0')}${endMin.toString().padStart(2, '0')}00`;
+            
+            // Escape special characters in description
+            const escapedActivity = block.activity.replace(/[,;\\]/g, '\\$&');
+            const description = `${block.category.toUpperCase()} - ${block.duration} minutes`;
+            
+            icsContent += [
+              'BEGIN:VEVENT',
+              `DTSTART:${startTime}`,
+              `DTEND:${endTime}`,
+              `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
+              `UID:${block.id}-${dateStr}@atomic5amclub.app`,
+              `SUMMARY:${escapedActivity}`,
+              `DESCRIPTION:${description}`,
+              'STATUS:CONFIRMED',
+              'SEQUENCE:0',
+              'BEGIN:VALARM',
+              'TRIGGER:-PT10M',
+              'ACTION:DISPLAY',
+              `DESCRIPTION:${escapedActivity} starts in 10 minutes!`,
+              'END:VALARM',
+              'END:VEVENT'
+            ].join('\r\n') + '\r\n';
           }
         }
       });
       
-      icsContent += 'END:VCALENDAR';
+      icsContent += 'END:VCALENDAR\r\n';
       
+      if (!hasEvents) {
+        alert('⚠️ No events to export! Please add some activities to your schedule first.');
+        return;
+      }
+      
+      // Create and download the .ics file
       const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -230,35 +314,59 @@ function App() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       
-      alert('📅 Calendar file downloaded! Open it on your phone to import into Google Calendar and get alerts.');
+      // Show success message with instructions
+      setTimeout(() => {
+        const message = `✅ Calendar file downloaded!
+
+HOW TO IMPORT:
+
+📱 On Android/iPhone:
+1. Find the downloaded .ics file in your Downloads folder
+2. Tap the file
+3. Choose "Google Calendar" or "Calendar"
+4. Events will be imported automatically
+
+💻 On Computer:
+1. Go to calendar.google.com
+2. Click the ⚙️ Settings icon (top right)
+3. Click "Import & Export"
+4. Click "Select file from your computer"
+5. Choose the downloaded .ics file
+6. Click "Import"
+
+✅ Done! Your events are now in Google Calendar with alerts.`;
+        
+        alert(message);
+      }, 500);
+      
     } catch (error) {
       console.error('Export error:', error);
-      alert('Error exporting calendar. Please try again.');
+      alert('❌ Error exporting calendar. Please try again or check that you have activities scheduled.');
     }
   };
 
-  // Handler functions
-  const toggleMorningActivity = (activity) => {
+  // Handler functions - optimized with useCallback
+  const toggleMorningActivity = useCallback((activity) => {
     setMorningRoutine(prev => ({
       ...prev,
       [activity]: { ...prev[activity], completed: !prev[activity].completed }
     }));
-  };
+  }, []);
 
-  const updateMorningActivity = (activity, field, value) => {
+  const updateMorningActivity = useCallback((activity, field, value) => {
     setMorningRoutine(prev => ({
       ...prev,
       [activity]: { ...prev[activity], [field]: value }
     }));
-  };
+  }, []);
 
-  const updateGratitude = (index, value) => {
+  const updateGratitude = useCallback((index, value) => {
     const newGratitude = [...gratitude];
     newGratitude[index] = value;
     setGratitude(newGratitude);
-  };
+  }, [gratitude]);
 
-  const toggleHabit = (habitId) => {
+  const toggleHabit = useCallback((habitId) => {
     setHabits(habits.map(habit => {
       if (habit.id === habitId) {
         const newCompleted = !habit.completed;
@@ -267,9 +375,9 @@ function App() {
       }
       return habit;
     }));
-  };
+  }, [habits]);
 
-  const addHabit = () => {
+  const addHabit = useCallback(() => {
     setHabits([...habits, {
       id: Date.now(),
       name: '',
@@ -278,19 +386,19 @@ function App() {
       completed: false,
       twoMinuteVersion: ''
     }]);
-  };
+  }, [habits]);
 
-  const updateHabit = (habitId, field, value) => {
+  const updateHabit = useCallback((habitId, field, value) => {
     setHabits(habits.map(habit => 
       habit.id === habitId ? { ...habit, [field]: value } : habit
     ));
-  };
+  }, [habits]);
 
-  const deleteHabit = (habitId) => {
+  const deleteHabit = useCallback((habitId) => {
     setHabits(habits.filter(habit => habit.id !== habitId));
-  };
+  }, [habits]);
 
-  const addTask = () => {
+  const addTask = useCallback(() => {
     if (newTask.trim()) {
       setTasks([...tasks, { 
         id: Date.now(), 
@@ -300,25 +408,25 @@ function App() {
       }]);
       setNewTask('');
     }
-  };
+  }, [newTask, tasks]);
 
-  const toggleTask = (taskId) => {
+  const toggleTask = useCallback((taskId) => {
     setTasks(tasks.map(task => 
       task.id === taskId ? { ...task, completed: !task.completed } : task
     ));
-  };
+  }, [tasks]);
 
-  const deleteTask = (taskId) => {
+  const deleteTask = useCallback((taskId) => {
     setTasks(tasks.filter(task => task.id !== taskId));
-  };
+  }, [tasks]);
 
-  const updateWeeklyGoal = (goalId, field, value) => {
+  const updateWeeklyGoal = useCallback((goalId, field, value) => {
     setWeeklyGoals(weeklyGoals.map(goal => 
       goal.id === goalId ? { ...goal, [field]: value } : goal
     ));
-  };
+  }, [weeklyGoals]);
 
-  const toggleWeeklyGoal = (goalId) => {
+  const toggleWeeklyGoal = useCallback((goalId) => {
     setWeeklyGoals(weeklyGoals.map(goal => 
       goal.id === goalId ? { ...goal, completed: !goal.completed } : goal
     ));
@@ -382,18 +490,19 @@ function App() {
     setDailyFive(newDailyFive);
   };
 
-  const getMorningProgress = () => {
+  // Memoized calculated values - prevents unnecessary recalculations
+  const morningProgress = useMemo(() => {
     const completed = Object.values(morningRoutine).filter(a => a.completed).length;
     return (completed / 3) * 100;
-  };
+  }, [morningRoutine]);
 
-  const getHabitCompletionRate = () => {
+  const habitCompletionRate = useMemo(() => {
     if (habits.length === 0) return 0;
     const completed = habits.filter(h => h.completed).length;
     return Math.round((completed / habits.length) * 100);
-  };
+  }, [habits]);
 
-  const getCategoryColor = (category) => {
+  const getCategoryColor = useCallback((category) => {
     const colors = {
       'morning': 'bg-yellow-100 border-yellow-300 text-yellow-800',
       'deep-work': 'bg-purple-100 border-purple-300 text-purple-800',
@@ -404,7 +513,7 @@ function App() {
       'personal': 'bg-pink-100 border-pink-300 text-pink-800'
     };
     return colors[category] || 'bg-gray-100 border-gray-300 text-gray-800';
-  };
+  }, []);
 
   const tabs = [
     { id: 'morning', label: 'Morning', icon: Sun },
@@ -416,17 +525,6 @@ function App() {
     { id: 'weekly', label: 'Weekly', icon: Calendar },
     { id: 'gratitude', label: 'Gratitude', icon: Heart }
   ];
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading your productivity dashboard...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 pb-6 px-3 sm:px-6">
@@ -479,14 +577,14 @@ function App() {
                 <Sun className="text-purple-600" size={16} />
                 <span className="text-xs sm:text-sm text-gray-600">Morning</span>
               </div>
-              <p className="text-lg sm:text-2xl font-bold text-purple-700 mt-1 sm:mt-2">{Math.round(getMorningProgress())}%</p>
+              <p className="text-lg sm:text-2xl font-bold text-purple-700 mt-1 sm:mt-2">{Math.round(morningProgress)}%</p>
             </div>
             <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-3 sm:p-4 rounded-xl">
               <div className="flex items-center gap-1 sm:gap-2">
                 <Target className="text-orange-600" size={16} />
                 <span className="text-xs sm:text-sm text-gray-600">Habits</span>
               </div>
-              <p className="text-lg sm:text-2xl font-bold text-orange-700 mt-1 sm:mt-2">{getHabitCompletionRate()}%</p>
+              <p className="text-lg sm:text-2xl font-bold text-orange-700 mt-1 sm:mt-2">{habitCompletionRate}%</p>
             </div>
           </div>
         </div>
