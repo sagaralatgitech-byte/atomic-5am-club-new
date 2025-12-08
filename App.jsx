@@ -206,142 +206,326 @@ function App() {
   };
 
   const exportToGoogleCalendar = () => {
-    try {
-      // Create properly formatted .ics content
-      let icsContent = [
-        'BEGIN:VCALENDAR',
-        'VERSION:2.0',
-        'PRODID:-//Atomic 5 AM Club//EN',
-        'CALSCALE:GREGORIAN',
-        'METHOD:PUBLISH',
-        'X-WR-CALNAME:Atomic 5 AM Club Schedule',
-        'X-WR-TIMEZONE:UTC'
-      ].join('\r\n') + '\r\n';
+    // Check if there are events to export
+    const hasVictoryHour = morningRoutine.move.activity || morningRoutine.reflect.activity || morningRoutine.grow.activity;
+    const hasTimeBlocks = timeBlocks.some(block => block.activity && block.time);
+    
+    if (!hasVictoryHour && !hasTimeBlocks) {
+      alert('⚠️ No events to add!\n\nPlease fill in:\n• Victory Hour activities (MOVE, REFLECT, GROW)\n• Time blocks with times and activities\n\nThen try again.');
+      return;
+    }
+
+    // Create Google Calendar links directly
+    createGoogleCalendarLinks();
+  };
+
+  const createGoogleCalendarLinks = () => {
+    const events = [];
+    const date = currentDate; // YYYY-MM-DD format
+    
+    // Add Victory Hour
+    if (morningRoutine.move.activity || morningRoutine.reflect.activity || morningRoutine.grow.activity) {
+      const description = [
+        `MOVE: ${morningRoutine.move.activity || 'Not specified'}`,
+        `REFLECT: ${morningRoutine.reflect.activity || 'Not specified'}`,
+        `GROW: ${morningRoutine.grow.activity || 'Not specified'}`
+      ].join('%0A'); // URL encoded newline
       
-      const dateStr = currentDate.replace(/-/g, '');
-      let hasEvents = false;
-      
-      // Add Victory Hour
-      if (morningRoutine.move.activity || morningRoutine.reflect.activity || morningRoutine.grow.activity) {
-        hasEvents = true;
-        const description = [
-          `MOVE: ${morningRoutine.move.activity || 'Not specified'}`,
-          `REFLECT: ${morningRoutine.reflect.activity || 'Not specified'}`,
-          `GROW: ${morningRoutine.grow.activity || 'Not specified'}`
-        ].join('\\n');
-        
-        icsContent += [
-          'BEGIN:VEVENT',
-          `DTSTART:${dateStr}T050000`,
-          `DTEND:${dateStr}T060000`,
-          `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
-          `UID:victory-hour-${dateStr}@atomic5amclub.app`,
-          'SUMMARY:Victory Hour - 20/20/20 Formula',
-          `DESCRIPTION:${description}`,
-          'STATUS:CONFIRMED',
-          'SEQUENCE:0',
-          'BEGIN:VALARM',
-          'TRIGGER:-PT15M',
-          'ACTION:DISPLAY',
-          'DESCRIPTION:Victory Hour starts in 15 minutes!',
-          'END:VALARM',
-          'END:VEVENT'
-        ].join('\r\n') + '\r\n';
-      }
-      
-      // Add time blocks
-      timeBlocks.forEach((block) => {
-        if (block.activity && block.time) {
-          const timeMatch = block.time.match(/(\d+):(\d+)\s*(AM|PM)/i);
-          
-          if (timeMatch) {
-            hasEvents = true;
-            let [, hours, minutes, period] = timeMatch;
-            hours = parseInt(hours);
-            
-            // Convert to 24-hour format
-            if (period.toUpperCase() === 'PM' && hours !== 12) hours += 12;
-            if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
-            
-            const startTime = `${dateStr}T${hours.toString().padStart(2, '0')}${minutes}00`;
-            
-            // Calculate end time
-            const totalMinutes = hours * 60 + parseInt(minutes) + block.duration;
-            const endHour = Math.floor(totalMinutes / 60);
-            const endMin = totalMinutes % 60;
-            const endTime = `${dateStr}T${endHour.toString().padStart(2, '0')}${endMin.toString().padStart(2, '0')}00`;
-            
-            // Escape special characters in description
-            const escapedActivity = block.activity.replace(/[,;\\]/g, '\\$&');
-            const description = `${block.category.toUpperCase()} - ${block.duration} minutes`;
-            
-            icsContent += [
-              'BEGIN:VEVENT',
-              `DTSTART:${startTime}`,
-              `DTEND:${endTime}`,
-              `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
-              `UID:${block.id}-${dateStr}@atomic5amclub.app`,
-              `SUMMARY:${escapedActivity}`,
-              `DESCRIPTION:${description}`,
-              'STATUS:CONFIRMED',
-              'SEQUENCE:0',
-              'BEGIN:VALARM',
-              'TRIGGER:-PT10M',
-              'ACTION:DISPLAY',
-              `DESCRIPTION:${escapedActivity} starts in 10 minutes!`,
-              'END:VALARM',
-              'END:VEVENT'
-            ].join('\r\n') + '\r\n';
-          }
-        }
+      events.push({
+        title: 'Victory Hour - 20/20/20 Formula',
+        date: date,
+        startTime: '05:00',
+        endTime: '06:00',
+        description: description
       });
-      
-      icsContent += 'END:VCALENDAR\r\n';
-      
-      if (!hasEvents) {
-        alert('⚠️ No events to export! Please add some activities to your schedule first.');
-        return;
+    }
+    
+    // Add time blocks
+    timeBlocks.forEach(block => {
+      if (block.activity && block.time) {
+        const timeMatch = block.time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+        if (timeMatch) {
+          let [, hours, minutes, period] = timeMatch;
+          hours = parseInt(hours);
+          
+          // Convert to 24-hour format
+          if (period.toUpperCase() === 'PM' && hours !== 12) hours += 12;
+          if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
+          
+          const startTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
+          
+          // Calculate end time
+          const totalMinutes = hours * 60 + parseInt(minutes) + block.duration;
+          const endHour = Math.floor(totalMinutes / 60);
+          const endMin = totalMinutes % 60;
+          const endTime = `${endHour.toString().padStart(2, '0')}:${endMin.toString().padStart(2, '0')}`;
+          
+          events.push({
+            title: block.activity,
+            date: date,
+            startTime: startTime,
+            endTime: endTime,
+            description: `${block.category.toUpperCase()} - ${block.duration} minutes`
+          });
+        }
       }
+    });
+
+    if (events.length === 0) {
+      alert('No valid events found to add.');
+      return;
+    }
+
+    // Create HTML page with direct links
+    const linksHTML = events.map((event) => {
+      // Format: YYYYMMDDTHHMMSS
+      const dateFormatted = event.date.replace(/-/g, '');
+      const startDateTime = `${dateFormatted}T${event.startTime.replace(':', '')}00`;
+      const endDateTime = `${dateFormatted}T${event.endTime.replace(':', '')}00`;
       
-      // Create and download the .ics file
-      const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+      // Google Calendar URL format
+      const googleCalURL = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title)}&dates=${startDateTime}/${endDateTime}&details=${encodeURIComponent(event.description)}&sf=true&output=xml`;
+      
+      return `
+        <div class="event-card">
+          <div class="event-title">${event.title}</div>
+          <div class="event-time">${event.startTime} - ${event.endTime}</div>
+          <a href="${googleCalURL}" target="_blank" class="add-button">
+            📅 Add to Google Calendar
+          </a>
+        </div>
+      `;
+    }).join('');
+
+    const fullHTML = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Events to Google Calendar</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 {
+      color: #1e293b;
+      margin-bottom: 8px;
+      font-size: 28px;
+      font-weight: 700;
+    }
+    .subtitle {
+      color: #64748b;
+      margin-bottom: 24px;
+      font-size: 15px;
+    }
+    .instructions {
+      background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+      border-left: 4px solid #f97316;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 30px;
+      line-height: 1.7;
+    }
+    .instructions strong {
+      color: #ea580c;
+      display: block;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+    .instructions ol {
+      margin-left: 20px;
+      color: #78350f;
+    }
+    .instructions li {
+      margin: 8px 0;
+    }
+    .event-card {
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      border-left: 4px solid #3b82f6;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .event-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+    }
+    .event-title {
+      font-weight: 600;
+      color: #1e40af;
+      margin-bottom: 6px;
+      font-size: 17px;
+    }
+    .event-time {
+      font-size: 14px;
+      color: #64748b;
+      margin-bottom: 14px;
+    }
+    .add-button {
+      display: inline-block;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
+    }
+    .add-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 12px rgba(59, 130, 246, 0.4);
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    }
+    .add-button:active {
+      transform: translateY(0);
+    }
+    .success-note {
+      background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+      border-left: 4px solid #22c55e;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 30px;
+      line-height: 1.7;
+    }
+    .success-note strong {
+      color: #15803d;
+      display: block;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+    .success-note ul {
+      margin-left: 20px;
+      color: #166534;
+    }
+    .success-note li {
+      margin: 6px 0;
+    }
+    .close-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      border: none;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      font-size: 24px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s;
+      color: #64748b;
+    }
+    .close-btn:hover {
+      transform: scale(1.1);
+      color: #1e293b;
+    }
+    @media (max-width: 640px) {
+      body {
+        padding: 10px;
+      }
+      .container {
+        padding: 20px;
+      }
+      h1 {
+        font-size: 24px;
+      }
+      .close-btn {
+        top: 10px;
+        right: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <button class="close-btn" onclick="window.close()" title="Close">×</button>
+  
+  <div class="container">
+    <h1>📅 Add to Google Calendar</h1>
+    <div class="subtitle">Click each button below to add events one by one</div>
+    
+    <div class="instructions">
+      <strong>📱 How it works:</strong>
+      <ol>
+        <li>Click "Add to Google Calendar" button</li>
+        <li>Google Calendar opens in a new tab</li>
+        <li>Review the event details</li>
+        <li>Click "Save" in Google Calendar</li>
+        <li>Return here and repeat for next event</li>
+        <li>Done! 🎉</li>
+      </ol>
+    </div>
+
+    ${linksHTML}
+
+    <div class="success-note">
+      <strong>✅ After adding all events:</strong>
+      <ul>
+        <li>Open Google Calendar app on your phone</li>
+        <li>Go to Settings → Notifications</li>
+        <li>Enable notifications for events</li>
+        <li>You'll get alerts before each activity!</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    // Track which buttons were clicked
+    const buttons = document.querySelectorAll('.add-button');
+    buttons.forEach(button => {
+      button.addEventListener('click', function() {
+        this.style.background = 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)';
+        this.innerHTML = '✅ Added! Click again to re-add';
+      });
+    });
+  </script>
+</body>
+</html>
+    `;
+
+    // Open in new window/tab
+    const newWindow = window.open('', '_blank', 'width=700,height=800,scrollbars=yes');
+    if (newWindow) {
+      newWindow.document.write(fullHTML);
+      newWindow.document.close();
+      
+      // Show quick instructions
+      setTimeout(() => {
+        alert('✅ Calendar page opened!\n\nClick each "Add to Google Calendar" button to add events.\n\nTip: Keep this page open until you add all events.');
+      }, 500);
+    } else {
+      // Popup blocked - create download link instead
+      const blob = new Blob([fullHTML], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `atomic-5am-schedule-${currentDate}.ics`;
-      document.body.appendChild(link);
+      link.download = `add-to-calendar-${currentDate}.html`;
       link.click();
-      document.body.removeChild(link);
       URL.revokeObjectURL(url);
       
-      // Show success message with instructions
-      setTimeout(() => {
-        const message = `✅ Calendar file downloaded!
-
-HOW TO IMPORT:
-
-📱 On Android/iPhone:
-1. Find the downloaded .ics file in your Downloads folder
-2. Tap the file
-3. Choose "Google Calendar" or "Calendar"
-4. Events will be imported automatically
-
-💻 On Computer:
-1. Go to calendar.google.com
-2. Click the ⚙️ Settings icon (top right)
-3. Click "Import & Export"
-4. Click "Select file from your computer"
-5. Choose the downloaded .ics file
-6. Click "Import"
-
-✅ Done! Your events are now in Google Calendar with alerts.`;
-        
-        alert(message);
-      }, 500);
-      
-    } catch (error) {
-      console.error('Export error:', error);
-      alert('❌ Error exporting calendar. Please try again or check that you have activities scheduled.');
+      alert('📄 Calendar page downloaded!\n\n1. Find "add-to-calendar.html" in Downloads\n2. Open it in your browser\n3. Click each button to add events\n\n💡 Tip: Allow popups for easier use next time');
     }
   };
 
