@@ -23,6 +23,127 @@ const storage = {
   }
 };
 
+// Component to display completed weekly goals history
+const WeeklyGoalsHistory = ({ getMonthsArchiveData }) => {
+  const [historyData, setHistoryData] = useState({ weeklyGoals: [] });
+  const [loading, setLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState('All');
+
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
+  const loadHistory = async () => {
+    setLoading(true);
+    const data = await getMonthsArchiveData(3);
+    setHistoryData(data);
+    setLoading(false);
+  };
+
+  const getCategoryColor = (category) => {
+    const colors = {
+      'Health': 'bg-emerald-900/30 border-emerald-500/50 text-emerald-300',
+      'Career': 'bg-blue-900/30 border-blue-500/50 text-blue-300',
+      'Personal': 'bg-purple-900/30 border-purple-500/50 text-purple-300',
+      'Relationships': 'bg-pink-900/30 border-pink-500/50 text-pink-300',
+      'Finance': 'bg-amber-900/30 border-amber-500/50 text-amber-300'
+    };
+    return colors[category] || 'bg-slate-700/30 border-slate-500/50 text-slate-300';
+  };
+
+  const groupedGoals = {};
+  historyData.weeklyGoals.forEach(goal => {
+    if (!groupedGoals[goal.category]) {
+      groupedGoals[goal.category] = [];
+    }
+    groupedGoals[goal.category].push(goal);
+  });
+
+  const categories = ['All', ...Object.keys(groupedGoals)];
+  const displayGoals = selectedCategory === 'All' 
+    ? historyData.weeklyGoals 
+    : groupedGoals[selectedCategory] || [];
+
+  if (loading) {
+    return (
+      <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
+        <div className="text-center text-amber-200">Loading history...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
+      <h2 className="text-3xl font-black text-amber-400 mb-6 flex items-center gap-3">
+        <TrendingUp className="text-amber-500" size={36} />
+        Completed Goals History (Last 3 Months)
+      </h2>
+
+      {displayGoals.length === 0 ? (
+        <div className="text-center py-8 text-amber-200/60">
+          <p className="text-lg">No completed goals yet. Start setting and completing your weekly goals!</p>
+        </div>
+      ) : (
+        <>
+          {/* Category Filter */}
+          <div className="mb-6 flex flex-wrap gap-2">
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-4 py-2 rounded-xl font-semibold transition-all ${
+                  selectedCategory === cat
+                    ? 'bg-amber-500 text-white scale-105'
+                    : 'bg-slate-700/50 text-amber-200 hover:bg-slate-700'
+                }`}
+              >
+                {cat} ({cat === 'All' ? displayGoals.length : (groupedGoals[cat] || []).length})
+              </button>
+            ))}
+          </div>
+
+          {/* Goals List */}
+          <div className="space-y-3">
+            {displayGoals.map((goal, idx) => (
+              <div
+                key={idx}
+                className={`border-2 rounded-xl p-4 ${getCategoryColor(goal.category)}`}
+              >
+                <div className="flex items-start gap-3">
+                  <CheckCircle size={24} className="fill-current mt-1 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-bold text-lg">{goal.goal}</p>
+                    <div className="flex items-center gap-4 mt-2 text-sm">
+                      <span className="px-3 py-1 bg-black/30 rounded-full">{goal.category}</span>
+                      <span className="opacity-75">{goal.completedDate}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Statistics */}
+          <div className="mt-8 grid grid-cols-3 gap-4">
+            <div className="bg-slate-700/50 p-4 rounded-xl border border-amber-500/30 text-center">
+              <p className="text-3xl font-black text-amber-400">{displayGoals.length}</p>
+              <p className="text-sm text-amber-200/70 mt-1">Completed</p>
+            </div>
+            <div className="bg-slate-700/50 p-4 rounded-xl border border-amber-500/30 text-center">
+              <p className="text-3xl font-black text-emerald-400">{Object.keys(groupedGoals).length}</p>
+              <p className="text-sm text-amber-200/70 mt-1">Categories</p>
+            </div>
+            <div className="bg-slate-700/50 p-4 rounded-xl border border-amber-500/30 text-center">
+              <p className="text-3xl font-black text-purple-400">{(displayGoals.length / Math.max(1, Object.values(groupedGoals).flat().length) * 100).toFixed(0)}%</p>
+              <p className="text-sm text-amber-200/70 mt-1">Completion Rate</p>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 const AtomicProductivityApp = () => {
   const [activeTab, setActiveTab] = useState('morning');
   const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
@@ -84,6 +205,83 @@ const AtomicProductivityApp = () => {
     { id: 1, trigger: 'After I wake up', newHabit: 'I will drink a glass of water', completed: false }
   ]);
 
+  // Calculate if today is a perfect day
+  const isPerfectDay = () => {
+    const allHabitsCompleted = habits.every(h => h.completed);
+    const morningRoutineComplete = 
+      morningRoutine.move.completed && 
+      morningRoutine.reflect.completed && 
+      morningRoutine.grow.completed;
+    return allHabitsCompleted && morningRoutineComplete;
+  };
+
+  // Update stats based on day completion
+  const updateDayStats = async (completedDate) => {
+    try {
+      const completedDateData = await storage.get(`data-${completedDate}`);
+      if (!completedDateData || !completedDateData.value) return;
+      
+      const dayData = JSON.parse(completedDateData.value);
+      const dayHabits = dayData.habits || [];
+      const dayMorningRoutine = dayData.morningRoutine || morningRoutine;
+      
+      const dayAllHabitsCompleted = dayHabits.every(h => h.completed);
+      const dayMorningComplete = 
+        dayMorningRoutine.move?.completed && 
+        dayMorningRoutine.reflect?.completed && 
+        dayMorningRoutine.grow?.completed;
+      const wasPerfectDay = dayAllHabitsCompleted && dayMorningComplete;
+      
+      let newStats = { ...stats };
+      
+      // Increment total days
+      newStats.totalDays = Math.max(stats.totalDays, dayHabits.length > 0 ? stats.totalDays + 1 : stats.totalDays);
+      
+      // Track perfect days
+      if (wasPerfectDay && !stats.perfectDays) {
+        newStats.perfectDays = (stats.perfectDays || 0) + 1;
+      }
+      
+      // Calculate streak (simplified: if today is perfect, increment streak)
+      if (isPerfectDay()) {
+        newStats.currentStreak = (stats.currentStreak || 0) + 1;
+        if (newStats.currentStreak > (stats.longestStreak || 0)) {
+          newStats.longestStreak = newStats.currentStreak;
+        }
+      } else {
+        // Reset streak if today is not perfect
+        newStats.currentStreak = 0;
+      }
+      
+      setStats(newStats);
+      await storage.set('stats', JSON.stringify(newStats));
+    } catch (error) {
+      console.error('Error updating day stats:', error);
+    }
+  };
+
+  // Handle date changes - save first, then load and update stats
+  const handleDateChange = async (newDate) => {
+    // Save current date's data first
+    if (!loading) {
+      // Update stats for the current date before switching
+      await updateDayStats(currentDate);
+      
+      await storage.set(`data-${currentDate}`, JSON.stringify({
+        morningRoutine,
+        gratitude,
+        habits,
+        tasks,
+        timeBlocks,
+        dailyFive,
+        date: currentDate,
+        savedAt: new Date().toISOString()
+      }));
+    }
+    // Then change to new date (which triggers loadData via useEffect)
+    setCurrentDate(newDate);
+  };
+
   // Load data on mount and date change
   useEffect(() => {
     loadData();
@@ -103,6 +301,7 @@ const AtomicProductivityApp = () => {
         setTasks(data.tasks || []);
         setTimeBlocks(data.timeBlocks || timeBlocks);
         setDailyFive(data.dailyFive || ['', '', '', '', '']);
+        setHabitStacks(data.habitStacks || habitStacks);
       }
       
       // Load persistent data
@@ -120,11 +319,6 @@ const AtomicProductivityApp = () => {
       if (identityResult && identityResult.value) {
         setIdentity(JSON.parse(identityResult.value));
       }
-
-      const stacksResult = await storage.get('habit-stacks');
-      if (stacksResult && stacksResult.value) {
-        setHabitStacks(JSON.parse(stacksResult.value));
-      }
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -139,6 +333,13 @@ const AtomicProductivityApp = () => {
     }
   }, [morningRoutine, gratitude, habits, tasks, stats, weeklyGoals, identity, habitStacks, timeBlocks, dailyFive]);
 
+  // Update stats when habits or morning routine changes
+  useEffect(() => {
+    if (!loading) {
+      updateStatsOnCompletion();
+    }
+  }, [morningRoutine, habits]);
+
   const saveData = async () => {
     try {
       const dateKey = `data-${currentDate}`;
@@ -149,6 +350,7 @@ const AtomicProductivityApp = () => {
         tasks,
         timeBlocks,
         dailyFive,
+        habitStacks,
         date: currentDate,
         savedAt: new Date().toISOString()
       };
@@ -157,10 +359,207 @@ const AtomicProductivityApp = () => {
       await storage.set('stats', JSON.stringify(stats));
       await storage.set('weekly-goals', JSON.stringify(weeklyGoals));
       await storage.set('identity', JSON.stringify(identity));
-      await storage.set('habit-stacks', JSON.stringify(habitStacks));
+      
+      // Archive data and purge old records
+      await archiveAndPurgeData();
     } catch (error) {
       console.error('Error saving data:', error);
     }
+  };
+
+  // Archive completed weekly goals, daily tasks, and gratitudes
+  const archiveData = async () => {
+    try {
+      const timestamp = new Date().toISOString();
+      const dateStr = currentDate;
+
+      // Archive completed weekly goals
+      const completedGoals = weeklyGoals.filter(g => g.completed && g.goal);
+      if (completedGoals.length > 0) {
+        const archiveKey = `archive-weekly-goals`;
+        const archiveResult = await storage.get(archiveKey);
+        let archiveData = archiveResult && archiveResult.value ? JSON.parse(archiveResult.value) : [];
+        
+        completedGoals.forEach(goal => {
+          archiveData.push({
+            ...goal,
+            completedDate: dateStr,
+            archivedAt: timestamp
+          });
+        });
+        
+        await storage.set(archiveKey, JSON.stringify(archiveData));
+      }
+
+      // Archive daily tasks
+      const archivedTasks = tasks.filter(t => t.text);
+      if (archivedTasks.length > 0) {
+        const archiveKey = `archive-daily-tasks-${dateStr}`;
+        const taskArchive = {
+          date: dateStr,
+          tasks: archivedTasks,
+          archivedAt: timestamp
+        };
+        await storage.set(archiveKey, JSON.stringify(taskArchive));
+      }
+
+      // Archive gratitudes
+      const validGratitudes = gratitude.filter(g => g && g.trim());
+      if (validGratitudes.length > 0) {
+        const archiveKey = `archive-gratitudes`;
+        const archiveResult = await storage.get(archiveKey);
+        let archiveData = archiveResult && archiveResult.value ? JSON.parse(archiveResult.value) : [];
+        
+        validGratitudes.forEach(g => {
+          archiveData.push({
+            text: g,
+            date: dateStr,
+            archivedAt: timestamp
+          });
+        });
+        
+        await storage.set(archiveKey, JSON.stringify(archiveData));
+      }
+    } catch (error) {
+      console.error('Error archiving data:', error);
+    }
+  };
+
+  // Get archives from past N months
+  const getMonthsArchiveData = async (months = 3) => {
+    try {
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - months);
+      const cutoffDate = threeMonthsAgo.toISOString().split('T')[0];
+
+      // Get archived weekly goals
+      const weeklyResult = await storage.get('archive-weekly-goals');
+      const weeklyGoalsArchive = weeklyResult && weeklyResult.value ? JSON.parse(weeklyResult.value) : [];
+      const recentWeeklyGoals = weeklyGoalsArchive.filter(g => g.completedDate >= cutoffDate);
+
+      // Get archived gratitudes
+      const gratitudeResult = await storage.get('archive-gratitudes');
+      const gratitudeArchive = gratitudeResult && gratitudeResult.value ? JSON.parse(gratitudeResult.value) : [];
+      const recentGratitudes = gratitudeArchive.filter(g => g.date >= cutoffDate);
+
+      // Get archived tasks from all dates
+      const archivedTasks = [];
+      const now = new Date();
+      for (let i = 0; i < 90; i++) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split('T')[0];
+        if (dateStr < cutoffDate) break;
+        
+        const taskKey = `archive-daily-tasks-${dateStr}`;
+        const taskResult = await storage.get(taskKey);
+        if (taskResult && taskResult.value) {
+          const taskData = JSON.parse(taskResult.value);
+          archivedTasks.push(taskData);
+        }
+      }
+
+      return {
+        weeklyGoals: recentWeeklyGoals,
+        gratitudes: recentGratitudes,
+        tasks: archivedTasks,
+        cutoffDate
+      };
+    } catch (error) {
+      console.error('Error retrieving archive data:', error);
+      return { weeklyGoals: [], gratitudes: [], tasks: [], cutoffDate: null };
+    }
+  };
+
+  // Purge data older than 3 months
+  const purgeOldData = async () => {
+    try {
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+      const cutoffDate = threeMonthsAgo.toISOString().split('T')[0];
+
+      // Purge weekly goals archive
+      const weeklyResult = await storage.get('archive-weekly-goals');
+      if (weeklyResult && weeklyResult.value) {
+        let archiveData = JSON.parse(weeklyResult.value);
+        archiveData = archiveData.filter(g => g.completedDate >= cutoffDate);
+        await storage.set('archive-weekly-goals', JSON.stringify(archiveData));
+      }
+
+      // Purge gratitudes archive
+      const gratitudeResult = await storage.get('archive-gratitudes');
+      if (gratitudeResult && gratitudeResult.value) {
+        let archiveData = JSON.parse(gratitudeResult.value);
+        archiveData = archiveData.filter(g => g.date >= cutoffDate);
+        await storage.set('archive-gratitudes', JSON.stringify(archiveData));
+      }
+
+      // Purge old task archives
+      const now = new Date();
+      for (let i = 0; i < 365; i++) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split('T')[0];
+        
+        if (dateStr < cutoffDate) {
+          const taskKey = `archive-daily-tasks-${dateStr}`;
+          try {
+            // Remove old task archives
+            const exists = await storage.get(taskKey);
+            if (exists) {
+              localStorage.removeItem(taskKey);
+            }
+          } catch (e) {
+            // Continue if removal fails
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error purging old data:', error);
+    }
+  };
+
+  // Archive and purge data - called on each save
+  const archiveAndPurgeData = async () => {
+    try {
+      // Archive current day's data
+      await archiveData();
+      
+      // Purge data older than 3 months (run less frequently to avoid performance impact)
+      const lastPurgeResult = await storage.get('last-purge-date');
+      const lastPurge = lastPurgeResult ? lastPurgeResult.value : null;
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Only purge once per day
+      if (lastPurge !== today) {
+        await purgeOldData();
+        await storage.set('last-purge-date', today);
+      }
+    } catch (error) {
+      console.error('Error in archive and purge:', error);
+    }
+  };
+
+  // Update stats in real-time when habits or morning routine completes
+  const updateStatsOnCompletion = async () => {
+    const perfect = isPerfectDay();
+    
+    setStats(prevStats => {
+      const newStats = { ...prevStats };
+      
+      // Only update if today is now perfect
+      if (perfect && prevStats.currentStreak === 0) {
+        newStats.currentStreak = (prevStats.currentStreak || 0) + 1;
+        newStats.perfectDays = (prevStats.perfectDays || 0) + 1;
+        
+        // Update longest streak
+        if (newStats.currentStreak > (prevStats.longestStreak || 0)) {
+          newStats.longestStreak = newStats.currentStreak;
+        }
+      }
+      
+      return newStats;
+    });
   };
 
   // Helper functions
@@ -326,6 +725,12 @@ const AtomicProductivityApp = () => {
     return Math.round((completed / habits.length) * 100);
   };
 
+  const getHabitStackingCompletionRate = () => {
+    if (habitStacks.length === 0) return 0;
+    const completed = habitStacks.filter(s => s.completed).length;
+    return Math.round((completed / habitStacks.length) * 100);
+  };
+
   const getCategoryColor = (category) => {
     const colors = {
       'morning': 'bg-gradient-to-br from-amber-100 to-orange-100 border-orange-300 text-orange-900',
@@ -339,102 +744,172 @@ const AtomicProductivityApp = () => {
     return colors[category] || 'bg-gradient-to-br from-gray-100 to-slate-100 border-gray-300 text-gray-900';
   };
 
-  const exportToGoogleCalendar = () => {
+  // Initialize Google Calendar API
+  const initializeGoogleCalendar = async () => {
+    return new Promise((resolve) => {
+      window.gapi.load('client:auth2', () => {
+        window.gapi.client.init({
+          apiKey: process.env.REACT_APP_GOOGLE_API_KEY,
+          clientId: process.env.REACT_APP_GOOGLE_CLIENT_ID,
+          scope: 'https://www.googleapis.com/auth/calendar',
+          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest']
+        }).then(() => {
+          resolve(true);
+        }).catch((error) => {
+          console.error('Google Calendar initialization failed:', error);
+          resolve(false);
+        });
+      });
+    });
+  };
+
+  // Sync time blocks to Google Calendar
+  const syncToGoogleCalendar = async () => {
     try {
-      let icsContent = 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Atomic 5 AM Club//EN\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n';
-      
-      // Add Victory Hour
-      if (morningRoutine.move.activity || morningRoutine.reflect.activity || morningRoutine.grow.activity) {
-        const date = currentDate.replace(/-/g, '');
-        const description = `MOVE: ${morningRoutine.move.activity || 'Not specified'}\\nREFLECT: ${morningRoutine.reflect.activity || 'Not specified'}\\nGROW: ${morningRoutine.grow.activity || 'Not specified'}`;
-        
-        icsContent += 'BEGIN:VEVENT\n';
-        icsContent += `DTSTART:${date}T050000\n`;
-        icsContent += `DTEND:${date}T060000\n`;
-        icsContent += `SUMMARY:Victory Hour - 20/20/20 Formula\n`;
-        icsContent += `DESCRIPTION:${description}\n`;
-        icsContent += `UID:victory-hour-${date}@atomic5amclub\n`;
-        icsContent += 'BEGIN:VALARM\n';
-        icsContent += 'TRIGGER:-PT15M\n';
-        icsContent += 'ACTION:DISPLAY\n';
-        icsContent += 'DESCRIPTION:Victory Hour starts in 15 minutes!\n';
-        icsContent += 'END:VALARM\n';
-        icsContent += 'END:VEVENT\n';
+      const isInitialized = await initializeGoogleCalendar();
+      if (!isInitialized) {
+        alert('❌ Unable to initialize Google Calendar. Please check your API credentials.');
+        return;
       }
-      
-      // Add time blocks
-      timeBlocks.forEach((block) => {
+
+      const auth2 = window.gapi.auth2.getAuthInstance();
+      if (!auth2 || !auth2.isSignedIn.get()) {
+        // Sign in if not already signed in
+        await auth2.signIn();
+      }
+
+      let eventsCreated = 0;
+      let eventsFailed = 0;
+
+      // Create Victory Hour event
+      if (morningRoutine.move.activity || morningRoutine.reflect.activity || morningRoutine.grow.activity) {
+        const victoryHourEvent = {
+          summary: '🌅 Victory Hour - 20/20/20 Formula',
+          description: `MOVE (5:00-5:20 AM): ${morningRoutine.move.activity || 'Not specified'}\nREFLECT (5:20-5:40 AM): ${morningRoutine.reflect.activity || 'Not specified'}\nGROW (5:40-6:00 AM): ${morningRoutine.grow.activity || 'Not specified'}`,
+          start: {
+            dateTime: `${currentDate}T05:00:00`,
+            timeZone: 'UTC'
+          },
+          end: {
+            dateTime: `${currentDate}T06:00:00`,
+            timeZone: 'UTC'
+          },
+          reminders: {
+            useDefault: false,
+            overrides: [
+              { method: 'notification', minutes: 15 }
+            ]
+          }
+        };
+
+        try {
+          await window.gapi.client.calendar.events.insert({
+            calendarId: 'primary',
+            resource: victoryHourEvent
+          });
+          eventsCreated++;
+        } catch (error) {
+          console.error('Failed to create Victory Hour event:', error);
+          eventsFailed++;
+        }
+      }
+
+      // Create time block events
+      for (const block of timeBlocks) {
         if (block.activity && block.time) {
-          const date = currentDate.replace(/-/g, '');
           const timeMatch = block.time.match(/(\d+):(\d+)\s*(AM|PM)/i);
-          
           if (timeMatch) {
             let [, hours, minutes, period] = timeMatch;
             hours = parseInt(hours);
-            
+
             if (period.toUpperCase() === 'PM' && hours !== 12) hours += 12;
             if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
-            
-            const startTime = `${date}T${hours.toString().padStart(2, '0')}${minutes}00`;
+
+            const startTime = `${currentDate}T${hours.toString().padStart(2, '0')}:${minutes}:00`;
             const endHour = hours + Math.floor(block.duration / 60);
-            const endMinutes = (parseInt(minutes) + (block.duration % 60)).toString().padStart(2, '0');
-            const endTime = `${date}T${endHour.toString().padStart(2, '0')}${endMinutes}00`;
-            
-            icsContent += 'BEGIN:VEVENT\n';
-            icsContent += `DTSTART:${startTime}\n`;
-            icsContent += `DTEND:${endTime}\n`;
-            icsContent += `SUMMARY:${block.activity}\n`;
-            icsContent += `DESCRIPTION:${block.category.toUpperCase()} - ${block.duration} minutes\n`;
-            icsContent += `UID:${block.id}-${date}@atomic5amclub\n`;
-            icsContent += 'BEGIN:VALARM\n';
-            icsContent += 'TRIGGER:-PT10M\n';
-            icsContent += 'ACTION:DISPLAY\n';
-            icsContent += `DESCRIPTION:${block.activity} starts in 10 minutes!\n`;
-            icsContent += 'END:VALARM\n';
-            icsContent += 'END:VEVENT\n';
+            const endMinutes = (parseInt(minutes) + (block.duration % 60)) % 60;
+            const endTime = `${currentDate}T${endHour.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00`;
+
+            const categoryEmojis = {
+              'morning': '🌅',
+              'deep-work': '🎯',
+              'work': '💼',
+              'break': '🌿',
+              'exercise': '💪',
+              'learning': '📚',
+              'personal': '❤️'
+            };
+
+            const timeBlockEvent = {
+              summary: `${categoryEmojis[block.category] || '📌'} ${block.activity}`,
+              description: `Category: ${block.category.toUpperCase()}\nDuration: ${block.duration} minutes`,
+              start: {
+                dateTime: startTime,
+                timeZone: 'UTC'
+              },
+              end: {
+                dateTime: endTime,
+                timeZone: 'UTC'
+              },
+              reminders: {
+                useDefault: false,
+                overrides: [
+                  { method: 'notification', minutes: 10 }
+                ]
+              }
+            };
+
+            try {
+              await window.gapi.client.calendar.events.insert({
+                calendarId: 'primary',
+                resource: timeBlockEvent
+              });
+              eventsCreated++;
+            } catch (error) {
+              console.error(`Failed to create event for ${block.activity}:`, error);
+              eventsFailed++;
+            }
           }
         }
-      });
-      
-      icsContent += 'END:VCALENDAR';
-      
-      const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `atomic-5am-schedule-${currentDate}.ics`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      alert('✅ Calendar exported! Open the file on your phone to import and get alerts.');
+      }
+
+      // Show result
+      if (eventsCreated > 0) {
+        alert(`✅ Calendar synced! ${eventsCreated} event(s) created.\n${eventsFailed > 0 ? `⚠️ ${eventsFailed} event(s) failed to create.` : ''}`);
+      } else {
+        alert('⚠️ No events created. Please add time blocks and activities first.');
+      }
     } catch (error) {
-      console.error('Export error:', error);
-      alert('Error exporting calendar. Please try again.');
+      console.error('Error syncing to Google Calendar:', error);
+      alert(`❌ Error syncing to Google Calendar: ${error.message}`);
     }
+  };
+
+  const exportToGoogleCalendar = async () => {
+    await syncToGoogleCalendar();
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 flex items-center justify-center">
         <div className="text-center">
-          <div className="relative">
-            <div className="animate-spin rounded-full h-20 w-20 border-t-4 border-b-4 border-amber-400 mx-auto mb-6"></div>
-            <Sun className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-amber-400 animate-pulse" size={32} />
+          <div className="relative mb-8">
+            <div className="w-24 h-24 rounded-full border-4 border-transparent border-t-indigo-500 border-r-indigo-500 animate-spin"></div>
+            <Sun className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={48} />
           </div>
-          <p className="text-amber-100 text-lg font-semibold">Loading your productivity dashboard...</p>
+          <p className="text-indigo-200 text-xl font-semibold">Loading your productivity dashboard...</p>
+          <p className="text-indigo-300/60 text-sm mt-2">Preparing your journey to success</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 p-4 sm:p-8">
       {/* Celebration Overlay */}
       {showCelebration && (
         <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
-          <div className="animate-bounce bg-gradient-to-r from-amber-400 to-orange-500 text-white px-8 py-4 rounded-full shadow-2xl text-2xl font-bold">
+          <div className="animate-bounce bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white px-10 py-5 rounded-full shadow-2xl text-2xl font-bold">
             🎉 Victory Hour Complete! 🎉
           </div>
         </div>
@@ -442,67 +917,67 @@ const AtomicProductivityApp = () => {
 
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 mb-6 border border-amber-500/20">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+        <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 mb-8 border border-indigo-500/20 backdrop-blur-sm">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6 mb-8">
             <div>
-              <h1 className="text-4xl sm:text-5xl font-black bg-gradient-to-r from-amber-400 via-orange-500 to-amber-400 bg-clip-text text-transparent animate-gradient">
+              <h1 className="text-5xl sm:text-6xl font-black bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
                 Atomic 5 AM Club
               </h1>
-              <p className="text-amber-100/80 mt-2 font-medium">Build atomic habits, own your morning, elevate your life</p>
+              <p className="text-indigo-200/70 mt-3 font-medium text-lg">Master your morning, elevate your life</p>
             </div>
             <div className="text-right">
               <input 
                 type="date" 
                 value={currentDate}
-                onChange={(e) => setCurrentDate(e.target.value)}
-                className="px-4 py-3 bg-slate-700 text-amber-100 border-2 border-amber-500/30 rounded-xl focus:outline-none focus:border-amber-500 transition-all font-semibold"
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="px-6 py-4 bg-slate-700/50 text-indigo-100 border-2 border-indigo-500/40 rounded-xl focus:outline-none focus:border-indigo-400 focus:bg-slate-700 transition-all font-semibold text-lg hover:bg-slate-700/70"
               />
-              <p className="text-sm text-amber-200/60 mt-2">Day {stats.totalDays} of your journey</p>
+              <p className="text-sm text-indigo-300/70 mt-3 font-medium">Day {stats.totalDays} of your journey</p>
             </div>
           </div>
           
           {/* Quick Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-4 rounded-2xl shadow-lg hover:shadow-xl transition-shadow">
-              <div className="flex items-center gap-2 mb-2">
-                <Flame className="text-blue-100" size={20} />
-                <span className="text-sm text-blue-100 font-semibold">Current Streak</span>
+            <div className="bg-gradient-to-br from-indigo-600/30 to-indigo-700/30 p-5 rounded-2xl shadow-lg hover:shadow-xl hover:from-indigo-600/40 hover:to-indigo-700/40 transition-all border border-indigo-500/30">
+              <div className="flex items-center gap-3 mb-3">
+                <Flame className="text-indigo-300" size={22} />
+                <span className="text-sm text-indigo-200 font-semibold">Streak</span>
               </div>
-              <p className="text-3xl font-black text-white">{stats.currentStreak}</p>
-              <p className="text-xs text-blue-100">days</p>
+              <p className="text-4xl font-black text-indigo-100">{stats.currentStreak}</p>
+              <p className="text-xs text-indigo-300/70 mt-1">days</p>
             </div>
             
-            <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 p-4 rounded-2xl shadow-lg hover:shadow-xl transition-shadow">
-              <div className="flex items-center gap-2 mb-2">
-                <Star className="text-emerald-100" size={20} />
-                <span className="text-sm text-emerald-100 font-semibold">Perfect Days</span>
+            <div className="bg-gradient-to-br from-emerald-600/30 to-green-700/30 p-5 rounded-2xl shadow-lg hover:shadow-xl hover:from-emerald-600/40 hover:to-green-700/40 transition-all border border-emerald-500/30">
+              <div className="flex items-center gap-3 mb-3">
+                <Star className="text-emerald-300" size={22} />
+                <span className="text-sm text-emerald-200 font-semibold">Perfect Days</span>
               </div>
-              <p className="text-3xl font-black text-white">{stats.perfectDays}</p>
-              <p className="text-xs text-emerald-100">completed</p>
+              <p className="text-4xl font-black text-emerald-100">{stats.perfectDays}</p>
+              <p className="text-xs text-emerald-300/70 mt-1">completed</p>
             </div>
             
-            <div className="bg-gradient-to-br from-amber-600 to-orange-600 p-4 rounded-2xl shadow-lg hover:shadow-xl transition-shadow">
-              <div className="flex items-center gap-2 mb-2">
-                <Coffee className="text-amber-100" size={20} />
-                <span className="text-sm text-amber-100 font-semibold">Morning Routine</span>
+            <div className="bg-gradient-to-br from-amber-600/30 to-orange-700/30 p-5 rounded-2xl shadow-lg hover:shadow-xl hover:from-amber-600/40 hover:to-orange-700/40 transition-all border border-amber-500/30">
+              <div className="flex items-center gap-3 mb-3">
+                <Coffee className="text-amber-300" size={22} />
+                <span className="text-sm text-amber-200 font-semibold">Morning</span>
               </div>
-              <p className="text-3xl font-black text-white">{Math.round(getMorningProgress())}%</p>
-              <p className="text-xs text-amber-100">complete</p>
+              <p className="text-4xl font-black text-amber-100">{Math.round(getMorningProgress())}%</p>
+              <p className="text-xs text-amber-300/70 mt-1">complete</p>
             </div>
             
-            <div className="bg-gradient-to-br from-purple-600 to-purple-700 p-4 rounded-2xl shadow-lg hover:shadow-xl transition-shadow">
-              <div className="flex items-center gap-2 mb-2">
-                <Zap className="text-purple-100" size={20} />
-                <span className="text-sm text-purple-100 font-semibold">Habits Today</span>
+            <div className="bg-gradient-to-br from-purple-600/30 to-pink-700/30 p-5 rounded-2xl shadow-lg hover:shadow-xl hover:from-purple-600/40 hover:to-pink-700/40 transition-all border border-purple-500/30">
+              <div className="flex items-center gap-3 mb-3">
+                <Zap className="text-purple-300" size={22} />
+                <span className="text-sm text-purple-200 font-semibold">Habits</span>
               </div>
-              <p className="text-3xl font-black text-white">{getHabitCompletionRate()}%</p>
-              <p className="text-xs text-purple-100">done</p>
+              <p className="text-4xl font-black text-purple-100">{getHabitCompletionRate()}%</p>
+              <p className="text-xs text-purple-300/70 mt-1">done</p>
             </div>
           </div>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl mb-6 p-3 border border-amber-500/20">
+        <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 rounded-2xl shadow-xl mb-8 p-3 border border-indigo-500/20 backdrop-blur-sm">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
               { id: 'morning', icon: Sun, label: 'Morning' },
@@ -519,14 +994,14 @@ const AtomicProductivityApp = () => {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`py-3 px-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-2 ${
+                  className={`py-3 px-4 rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 ${
                     activeTab === tab.id
-                      ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-lg scale-105'
-                      : 'text-amber-100/70 hover:bg-slate-700/50 hover:text-amber-100'
+                      ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg scale-105'
+                      : 'text-indigo-200/70 hover:bg-slate-700/50 hover:text-indigo-200 hover:shadow-md'
                   }`}
                 >
                   <Icon size={18} />
-                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="hidden sm:inline text-sm">{tab.label}</span>
                 </button>
               );
             })}
@@ -535,29 +1010,31 @@ const AtomicProductivityApp = () => {
 
         {/* Morning Tab */}
         {activeTab === 'morning' && (
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
-            <h2 className="text-3xl font-black text-amber-400 mb-6 flex items-center gap-3">
-              <Sun className="text-amber-500" size={36} />
+          <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 border border-indigo-500/20 backdrop-blur-sm">
+            <h2 className="text-4xl font-black text-indigo-300 mb-3 flex items-center gap-4">
+              <div className="p-3 bg-gradient-to-br from-amber-600/30 to-orange-600/30 rounded-xl border border-amber-500/30">
+                <Sun className="text-amber-400" size={32} />
+              </div>
               Victory Hour: 20/20/20 Formula
             </h2>
-            <p className="text-amber-100/80 mb-8 text-lg">The first hour of your day split into three 20-minute periods. Master your morning, master your life.</p>
+            <p className="text-indigo-200/70 mb-8 text-lg font-medium">Master your morning in three 20-minute periods. Build the foundation for your entire day.</p>
             
             <div className="space-y-6">
               {/* Move */}
-              <div className="border-2 border-orange-500/50 rounded-2xl p-6 bg-gradient-to-br from-orange-900/30 to-slate-800/50 hover:shadow-xl transition-all">
-                <div className="flex items-center gap-4 mb-4">
+              <div className="border-2 border-amber-500/40 rounded-2xl p-6 bg-gradient-to-br from-amber-900/20 to-slate-800/40 hover:shadow-xl hover:border-amber-500/60 transition-all hover:bg-gradient-to-br hover:from-amber-900/30 hover:to-slate-800/50">
+                <div className="flex items-center gap-4 mb-5">
                   <button
                     onClick={() => toggleMorningActivity('move')}
-                    className="text-orange-400 hover:scale-110 transition-transform"
+                    className={`transition-all duration-300 ${morningRoutine.move.completed ? 'text-amber-400 scale-110' : 'text-amber-500/70 hover:text-amber-400'}`}
                   >
                     {morningRoutine.move.completed ? 
-                      <CheckCircle size={40} className="fill-current" /> : 
-                      <Circle size={40} />
+                      <CheckCircle size={44} className="fill-current" /> : 
+                      <Circle size={44} />
                     }
                   </button>
                   <div>
-                    <h3 className="text-2xl font-bold text-orange-400">5:00 - 5:20 AM: MOVE</h3>
-                    <p className="text-sm text-orange-200/70">Vigorous exercise to boost BDNF, dopamine & serotonin</p>
+                    <h3 className="text-2xl font-bold text-amber-300">5:00 - 5:20 AM: MOVE</h3>
+                    <p className="text-sm text-amber-200/60">Vigorous exercise to boost BDNF, dopamine & serotonin</p>
                   </div>
                 </div>
                 <input
@@ -565,25 +1042,25 @@ const AtomicProductivityApp = () => {
                   placeholder="What exercise did you do? (e.g., jogging, yoga, HIIT)"
                   value={morningRoutine.move.activity}
                   onChange={(e) => updateMorningActivity('move', 'activity', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-700 text-amber-100 border-2 border-orange-500/30 rounded-xl focus:outline-none focus:border-orange-500 transition-all"
+                  className="w-full px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-amber-500/30 rounded-xl focus:outline-none focus:border-amber-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40"
                 />
               </div>
 
               {/* Reflect */}
-              <div className="border-2 border-purple-500/50 rounded-2xl p-6 bg-gradient-to-br from-purple-900/30 to-slate-800/50 hover:shadow-xl transition-all">
-                <div className="flex items-center gap-4 mb-4">
+              <div className="border-2 border-purple-500/40 rounded-2xl p-6 bg-gradient-to-br from-purple-900/20 to-slate-800/40 hover:shadow-xl hover:border-purple-500/60 transition-all hover:bg-gradient-to-br hover:from-purple-900/30 hover:to-slate-800/50">
+                <div className="flex items-center gap-4 mb-5">
                   <button
                     onClick={() => toggleMorningActivity('reflect')}
-                    className="text-purple-400 hover:scale-110 transition-transform"
+                    className={`transition-all duration-300 ${morningRoutine.reflect.completed ? 'text-purple-400 scale-110' : 'text-purple-500/70 hover:text-purple-400'}`}
                   >
                     {morningRoutine.reflect.completed ? 
-                      <CheckCircle size={40} className="fill-current" /> : 
-                      <Circle size={40} />
+                      <CheckCircle size={44} className="fill-current" /> : 
+                      <Circle size={44} />
                     }
                   </button>
                   <div>
-                    <h3 className="text-2xl font-bold text-purple-400">5:20 - 5:40 AM: REFLECT</h3>
-                    <p className="text-sm text-purple-200/70">Meditation, journaling, visualization, prayer</p>
+                    <h3 className="text-2xl font-bold text-purple-300">5:20 - 5:40 AM: REFLECT</h3>
+                    <p className="text-sm text-purple-200/60">Meditation, journaling, visualization, prayer</p>
                   </div>
                 </div>
                 <input
@@ -591,23 +1068,25 @@ const AtomicProductivityApp = () => {
                   placeholder="What reflection practice? (e.g., meditation, journaling, prayer)"
                   value={morningRoutine.reflect.activity}
                   onChange={(e) => updateMorningActivity('reflect', 'activity', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-700 text-amber-100 border-2 border-purple-500/30 rounded-xl focus:outline-none focus:border-purple-500 transition-all mb-4"
+                  className="w-full px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-purple-500/30 rounded-xl focus:outline-none focus:border-purple-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40 mb-4"
                 />
                 
-                <div className="p-4 bg-slate-700/50 rounded-xl border border-purple-500/30">
-                  <h4 className="font-bold text-purple-300 mb-3 flex items-center gap-2">
-                    <Target size={18} />
-                    Daily Five Concept: List 5 targets for today
+                <div className="p-5 bg-gradient-to-br from-purple-900/20 to-slate-800/30 rounded-2xl border-2 border-purple-500/30 hover:border-purple-500/50 transition-all">
+                  <h4 className="font-bold text-purple-300 mb-4 flex items-center gap-3 text-lg">
+                    <div className="p-2 bg-purple-600/30 rounded-lg">
+                      <Target size={20} className="text-purple-400" />
+                    </div>
+                    Daily Five: Your 5 Major Targets
                   </h4>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {dailyFive.map((item, index) => (
                       <input
                         key={index}
                         type="text"
-                        placeholder={`🎯 Target ${index + 1}`}
+                        placeholder={`🎯 Target ${index + 1}: What's one key outcome?`}
                         value={item}
                         onChange={(e) => updateDailyFive(index, e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-600 text-amber-100 border border-purple-500/30 rounded-lg focus:outline-none focus:border-purple-500 text-sm"
+                        className="w-full px-4 py-3 bg-slate-700/40 text-indigo-100 border border-purple-500/20 rounded-xl focus:outline-none focus:border-purple-400 focus:bg-slate-700/60 transition-all hover:bg-slate-700/50 placeholder-indigo-300/40 text-sm font-medium"
                       />
                     ))}
                   </div>
@@ -615,20 +1094,20 @@ const AtomicProductivityApp = () => {
               </div>
 
               {/* Grow */}
-              <div className="border-2 border-emerald-500/50 rounded-2xl p-6 bg-gradient-to-br from-emerald-900/30 to-slate-800/50 hover:shadow-xl transition-all">
-                <div className="flex items-center gap-4 mb-4">
+              <div className="border-2 border-emerald-500/40 rounded-2xl p-6 bg-gradient-to-br from-emerald-900/20 to-slate-800/40 hover:shadow-xl hover:border-emerald-500/60 transition-all hover:bg-gradient-to-br hover:from-emerald-900/30 hover:to-slate-800/50">
+                <div className="flex items-center gap-4 mb-5">
                   <button
                     onClick={() => toggleMorningActivity('grow')}
-                    className="text-emerald-400 hover:scale-110 transition-transform"
+                    className={`transition-all duration-300 ${morningRoutine.grow.completed ? 'text-emerald-400 scale-110' : 'text-emerald-500/70 hover:text-emerald-400'}`}
                   >
                     {morningRoutine.grow.completed ? 
-                      <CheckCircle size={40} className="fill-current" /> : 
-                      <Circle size={40} />
+                      <CheckCircle size={44} className="fill-current" /> : 
+                      <Circle size={44} />
                     }
                   </button>
                   <div>
-                    <h3 className="text-2xl font-bold text-emerald-400">5:40 - 6:00 AM: GROW</h3>
-                    <p className="text-sm text-emerald-200/70">Reading, learning, skill development</p>
+                    <h3 className="text-2xl font-bold text-emerald-300">5:40 - 6:00 AM: GROW</h3>
+                    <p className="text-sm text-emerald-200/60">Reading, learning, skill development</p>
                   </div>
                 </div>
                 <input
@@ -636,15 +1115,15 @@ const AtomicProductivityApp = () => {
                   placeholder="What did you learn? (e.g., read 20 pages, online course, podcast)"
                   value={morningRoutine.grow.activity}
                   onChange={(e) => updateMorningActivity('grow', 'activity', e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-700 text-amber-100 border-2 border-emerald-500/30 rounded-xl focus:outline-none focus:border-emerald-500 transition-all"
+                  className="w-full px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-emerald-500/30 rounded-xl focus:outline-none focus:border-emerald-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40"
                 />
               </div>
             </div>
 
-            <div className="mt-8 p-6 bg-gradient-to-r from-amber-900/40 to-orange-900/40 rounded-2xl border-2 border-amber-500/30">
-              <p className="text-amber-100 flex items-start gap-3">
-                <span className="text-2xl">💡</span>
-                <span><strong className="text-amber-400">Remember:</strong> It takes 66 days to reach automaticity. Stay consistent, and never miss twice!</span>
+            <div className="mt-8 p-6 bg-gradient-to-r from-amber-900/30 to-orange-900/30 rounded-2xl border-2 border-amber-500/40 hover:border-amber-500/60 transition-all">
+              <p className="text-indigo-100 flex items-start gap-4 text-lg">
+                <span className="text-3xl flex-shrink-0 mt-1">💡</span>
+                <span><strong className="text-amber-300 block mb-2">Victory Hour Wisdom:</strong> It takes 66 days to reach automaticity. Stay consistent, and never miss twice! Your morning sets the tone for your entire day.</span>
               </p>
             </div>
           </div>
@@ -652,26 +1131,28 @@ const AtomicProductivityApp = () => {
 
         {/* Schedule Tab */}
         {activeTab === 'schedule' && (
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+          <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 border border-indigo-500/20 backdrop-blur-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
               <div>
-                <h2 className="text-3xl font-black text-amber-400 flex items-center gap-3">
-                  <Clock className="text-amber-500" size={36} />
+                <h2 className="text-4xl font-black text-indigo-300 flex items-center gap-4 mb-3">
+                  <div className="p-3 bg-gradient-to-br from-purple-600/30 to-blue-600/30 rounded-xl border border-purple-500/30">
+                    <Clock className="text-purple-400" size={32} />
+                  </div>
                   Daily Time Blocking
                 </h2>
-                <p className="text-amber-100/80 mt-2">Plan your day from 5 AM to 11 PM with focused time blocks</p>
+                <p className="text-indigo-200/70 text-lg font-medium">Plan your day from 5 AM to 11 PM with focused time blocks</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-3 flex-wrap sm:flex-nowrap">
                 <button
                   onClick={addTimeBlock}
-                  className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:shadow-lg transition-all font-bold"
+                  className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl hover:shadow-xl hover:scale-105 transition-all font-bold text-lg border border-indigo-500/50 hover:border-indigo-400"
                 >
                   <Plus size={20} />
                   Add Block
                 </button>
                 <button
                   onClick={exportToGoogleCalendar}
-                  className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl hover:shadow-lg transition-all font-bold"
+                  className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-xl hover:scale-105 transition-all font-bold text-lg border border-purple-500/50 hover:border-purple-400"
                 >
                   <Download size={20} />
                   Export
@@ -680,12 +1161,14 @@ const AtomicProductivityApp = () => {
             </div>
 
             {/* Instructions */}
-            <div className="mb-6 p-4 bg-blue-900/30 rounded-xl border-2 border-blue-500/30">
-              <div className="flex items-start gap-3">
-                <Bell className="text-blue-400 flex-shrink-0 mt-1" size={20} />
-                <div className="text-sm text-blue-200">
-                  <p className="font-bold mb-2">📱 Get Phone Alerts:</p>
-                  <ol className="list-decimal ml-4 space-y-1">
+            <div className="mb-8 p-6 bg-gradient-to-r from-blue-900/25 to-indigo-900/25 rounded-2xl border-2 border-blue-500/40 hover:border-blue-500/60 transition-all">
+              <div className="flex items-start gap-4">
+                <div className="p-2 bg-blue-600/30 rounded-lg flex-shrink-0">
+                  <Bell className="text-blue-400" size={24} />
+                </div>
+                <div className="text-sm text-indigo-100">
+                  <p className="font-bold mb-3 text-lg text-blue-300">📱 Get Phone Alerts:</p>
+                  <ol className="list-decimal ml-5 space-y-2 text-indigo-200/80">
                     <li>Fill in your time blocks below</li>
                     <li>Click "Export" to download .ics file</li>
                     <li>Open file on your phone to import to Google Calendar</li>
@@ -697,7 +1180,7 @@ const AtomicProductivityApp = () => {
             </div>
 
             {/* Time Blocks */}
-            <div className="space-y-3">
+            <div className="space-y-4">
               {timeBlocks.sort((a, b) => {
                 const timeA = a.time.toLowerCase().includes('pm') && !a.time.startsWith('12') 
                   ? parseInt(a.time) + 12 : parseInt(a.time);
@@ -705,21 +1188,21 @@ const AtomicProductivityApp = () => {
                   ? parseInt(b.time) + 12 : parseInt(b.time);
                 return timeA - timeB;
               }).map(block => (
-                <div key={block.id} className={`border-2 rounded-2xl p-4 transition-all hover:shadow-lg ${getCategoryColor(block.category)}`}>
+                <div key={block.id} className={`border-2 rounded-2xl p-6 transition-all hover:shadow-xl ${getCategoryColor(block.category)}`}>
                   <div className="flex items-start gap-4">
                     <button
                       onClick={() => toggleTimeBlock(block.id)}
-                      className="mt-1 hover:scale-110 transition-transform"
+                      className={`mt-1 transition-all duration-300 flex-shrink-0 ${block.completed ? 'text-emerald-400 scale-110' : 'text-indigo-400 hover:text-indigo-300'}`}
                     >
-                      {block.completed ? <CheckCircle size={28} className="fill-current" /> : <Circle size={28} />}
+                      {block.completed ? <CheckCircle size={40} className="fill-current" /> : <Circle size={40} />}
                     </button>
 
-                    <div className="flex-1 space-y-3">
-                      <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="flex-1 space-y-4">
+                      <div className="flex flex-col sm:flex-row gap-3">
                         <select
                           value={block.time}
                           onChange={(e) => updateTimeBlock(block.id, 'time', e.target.value)}
-                          className="px-3 py-2 border-2 border-gray-400 rounded-lg focus:outline-none focus:border-amber-500 bg-white font-semibold"
+                          className="px-4 py-3 border-2 border-indigo-500/40 rounded-xl focus:outline-none focus:border-indigo-400 bg-slate-700/60 text-indigo-100 font-semibold hover:bg-slate-700/80 transition-all"
                         >
                           <option value="">Select Time</option>
                           {timeSlots.map(slot => (
@@ -727,17 +1210,17 @@ const AtomicProductivityApp = () => {
                           ))}
                         </select>
                         
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-3">
                           <input
                             type="number"
                             value={block.duration}
                             onChange={(e) => updateTimeBlock(block.id, 'duration', parseInt(e.target.value))}
                             placeholder="Duration"
-                            className="w-24 px-3 py-2 border-2 border-gray-400 rounded-lg focus:outline-none focus:border-amber-500 font-semibold"
+                            className="w-28 px-4 py-3 border-2 border-indigo-500/40 rounded-xl focus:outline-none focus:border-indigo-400 bg-slate-700/60 text-indigo-100 font-semibold hover:bg-slate-700/80 transition-all"
                             min="5"
                             step="5"
                           />
-                          <span className="text-sm font-semibold">min</span>
+                          <span className="text-sm font-semibold text-indigo-200">min</span>
                         </div>
                       </div>
 
@@ -746,13 +1229,13 @@ const AtomicProductivityApp = () => {
                         placeholder="What will you do during this block?"
                         value={block.activity}
                         onChange={(e) => updateTimeBlock(block.id, 'activity', e.target.value)}
-                        className="w-full px-3 py-2 border-2 border-gray-400 rounded-lg focus:outline-none focus:border-amber-500 font-medium"
+                        className="w-full px-4 py-3 border-2 border-indigo-500/40 rounded-xl focus:outline-none focus:border-indigo-400 bg-slate-700/60 text-indigo-100 font-medium hover:bg-slate-700/80 transition-all placeholder-indigo-300/40"
                       />
 
                       <select
                         value={block.category}
                         onChange={(e) => updateTimeBlock(block.id, 'category', e.target.value)}
-                        className="px-3 py-2 border-2 border-gray-400 rounded-lg focus:outline-none focus:border-amber-500 text-sm bg-white font-semibold"
+                        className="px-4 py-3 border-2 border-indigo-500/40 rounded-xl focus:outline-none focus:border-indigo-400 text-sm bg-slate-700/60 text-indigo-100 font-semibold hover:bg-slate-700/80 transition-all"
                       >
                         <option value="morning">🌅 Morning Routine</option>
                         <option value="deep-work">🎯 Deep Work (90/90/1)</option>
@@ -766,9 +1249,9 @@ const AtomicProductivityApp = () => {
 
                     <button
                       onClick={() => deleteTimeBlock(block.id)}
-                      className="text-red-500 hover:text-red-700 hover:scale-110 transition-all mt-1"
+                      className="text-red-500/70 hover:text-red-400 hover:scale-110 transition-all mt-1 flex-shrink-0"
                     >
-                      <Trash2 size={20} />
+                      <Trash2 size={24} />
                     </button>
                   </div>
                 </div>
@@ -776,10 +1259,12 @@ const AtomicProductivityApp = () => {
             </div>
 
             {timeBlocks.length === 0 && (
-              <div className="text-center py-16 text-amber-400/50">
-                <Clock size={64} className="mx-auto mb-4 opacity-50" />
-                <p className="text-xl font-semibold">No time blocks yet</p>
-                <p className="text-sm mt-2">Click "Add Block" to start planning your day!</p>
+              <div className="text-center py-16">
+                <div className="p-4 bg-indigo-900/20 rounded-full inline-block mb-4">
+                  <Clock size={64} className="text-indigo-400 opacity-70" />
+                </div>
+                <p className="text-2xl font-bold text-indigo-300 mb-2">No time blocks yet</p>
+                <p className="text-indigo-200/70 text-lg">Click "Add Block" to start planning your day!</p>
               </div>
             )}
           </div>
@@ -787,18 +1272,19 @@ const AtomicProductivityApp = () => {
 
         {/* Habits Tab */}
         {activeTab === 'habits' && (
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+          <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 border border-indigo-500/20 backdrop-blur-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
               <div>
-                <h2 className="text-3xl font-black text-amber-400 flex items-center gap-3">
-                  <Target className="text-amber-500" size={36} />
+                <h2 className="text-4xl font-black text-indigo-300 flex items-center gap-4 mb-3">
+                  <div className="p-3 bg-gradient-to-br from-emerald-600/30 to-teal-600/30 rounded-xl border border-emerald-500/30">
+                    <Target className="text-emerald-400" size={32} />
+                  </div>
                   Atomic Habits Tracker
                 </h2>
-                <p className="text-amber-100/80 mt-2">Focus on being 1% better every day</p>
               </div>
               <button
                 onClick={addHabit}
-                className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-xl hover:shadow-lg transition-all font-bold"
+                className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl hover:shadow-xl hover:scale-105 transition-all font-bold text-lg border border-emerald-500/50 hover:border-emerald-400"
               >
                 <Plus size={20} />
                 Add Habit
@@ -807,34 +1293,34 @@ const AtomicProductivityApp = () => {
 
             <div className="space-y-4">
               {habits.map(habit => (
-                <div key={habit.id} className="border-2 border-amber-500/30 bg-slate-700/30 rounded-2xl p-4 hover:border-amber-500/50 hover:shadow-xl transition-all">
+                <div key={habit.id} className="border-2 border-emerald-500/40 bg-gradient-to-r from-emerald-900/15 to-slate-800/40 rounded-2xl p-6 hover:border-emerald-500/60 hover:shadow-xl transition-all">
                   <div className="flex items-center gap-4">
                     <button
                       onClick={() => toggleHabit(habit.id)}
-                      className="text-amber-400 hover:scale-110 transition-transform"
+                      className={`transition-all duration-300 flex-shrink-0 ${habit.completed ? 'text-emerald-400 scale-110' : 'text-emerald-500/70 hover:text-emerald-400'}`}
                     >
-                      {habit.completed ? <CheckCircle size={32} className="fill-current" /> : <Circle size={32} />}
+                      {habit.completed ? <CheckCircle size={40} className="fill-current" /> : <Circle size={40} />}
                     </button>
                     
-                    <div className="flex-1 space-y-2">
+                    <div className="flex-1 space-y-3">
                       <input
                         type="text"
                         placeholder="Habit name (e.g., Exercise for 30 minutes)"
                         value={habit.name}
                         onChange={(e) => updateHabit(habit.id, 'name', e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-600 text-amber-100 border-2 border-amber-500/30 rounded-lg focus:outline-none focus:border-amber-500"
+                        className="w-full px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-emerald-500/30 rounded-xl focus:outline-none focus:border-emerald-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40 font-medium"
                       />
                       <input
                         type="text"
                         placeholder="Two-minute version (e.g., Put on workout clothes)"
                         value={habit.twoMinuteVersion}
                         onChange={(e) => updateHabit(habit.id, 'twoMinuteVersion', e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-600 text-amber-100 border-2 border-amber-500/30 rounded-lg focus:outline-none focus:border-amber-500 text-sm"
+                        className="w-full px-4 py-2 bg-slate-700/50 text-indigo-100 border-2 border-emerald-500/30 rounded-xl focus:outline-none focus:border-emerald-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40 text-sm"
                       />
                       <select
                         value={habit.category}
                         onChange={(e) => updateHabit(habit.id, 'category', e.target.value)}
-                        className="px-3 py-2 bg-slate-600 text-amber-100 border-2 border-amber-500/30 rounded-lg focus:outline-none focus:border-amber-500 text-sm font-semibold"
+                        className="px-4 py-2 bg-slate-700/50 text-indigo-100 border-2 border-emerald-500/30 rounded-xl focus:outline-none focus:border-emerald-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 text-sm font-semibold"
                       >
                         <option>Morning</option>
                         <option>Health</option>
@@ -844,19 +1330,19 @@ const AtomicProductivityApp = () => {
                       </select>
                     </div>
 
-                    <div className="text-center bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl p-3 min-w-[80px]">
-                      <div className="flex items-center justify-center gap-1">
-                        <Flame className="text-white" size={20} />
-                        <div className="text-2xl font-black text-white">{habit.streak}</div>
+                    <div className="text-center bg-gradient-to-br from-amber-500/80 to-orange-600/80 rounded-2xl p-4 min-w-[100px] border border-amber-500/40 hover:border-amber-500/60 transition-all hover:shadow-lg">
+                      <div className="flex items-center justify-center gap-2">
+                        <Flame className="text-amber-100" size={22} />
+                        <div className="text-3xl font-black text-amber-50">{habit.streak}</div>
                       </div>
-                      <div className="text-xs text-white/90 font-semibold">day streak</div>
+                      <div className="text-xs text-amber-100/90 font-bold">day streak</div>
                     </div>
 
                     <button
                       onClick={() => deleteHabit(habit.id)}
-                      className="text-red-400 hover:text-red-500 hover:scale-110 transition-all"
+                      className="text-red-500/70 hover:text-red-400 hover:scale-110 transition-all flex-shrink-0"
                     >
-                      <Trash2 size={20} />
+                      <Trash2 size={24} />
                     </button>
                   </div>
                 </div>
@@ -885,66 +1371,68 @@ const AtomicProductivityApp = () => {
 
         {/* Identity Tab */}
         {activeTab === 'identity' && (
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
-            <h2 className="text-3xl font-black text-amber-400 mb-6 flex items-center gap-3">
-              <Star className="text-amber-500" size={36} />
+          <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 border border-indigo-500/20 backdrop-blur-sm">
+            <h2 className="text-4xl font-black text-indigo-300 mb-3 flex items-center gap-4">
+              <div className="p-3 bg-gradient-to-br from-purple-600/30 to-pink-600/30 rounded-xl border border-purple-500/30">
+                <Star className="text-purple-400" size={32} />
+              </div>
               Identity-Based Habits
             </h2>
-            <p className="text-amber-100/80 mb-8 text-lg">
+            <p className="text-indigo-200/70 mb-8 text-lg font-medium">
               Focus not on what you want to achieve, but on who you wish to become. Every action is a vote for your new identity.
             </p>
 
-            <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 rounded-2xl p-6 border-2 border-indigo-500/30 mb-6">
-              <label className="block text-xl font-bold text-indigo-300 mb-3">
+            <div className="bg-gradient-to-br from-purple-900/25 to-pink-900/25 rounded-2xl p-6 border-2 border-purple-500/40 mb-8 hover:border-purple-500/60 transition-all">
+              <label className="block text-xl font-bold text-purple-300 mb-4">
                 Who do you want to become?
               </label>
               <textarea
                 value={identity.statement}
                 onChange={(e) => setIdentity({ statement: e.target.value, updated: true })}
                 placeholder="I am someone who..."
-                className="w-full px-4 py-4 bg-slate-700 text-amber-100 border-2 border-indigo-500/30 rounded-xl focus:outline-none focus:border-indigo-500 resize-none font-medium"
+                className="w-full px-4 py-4 bg-slate-700/50 text-indigo-100 border-2 border-purple-500/30 rounded-xl focus:outline-none focus:border-purple-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 resize-none font-medium placeholder-indigo-300/40"
                 rows="4"
               />
-              <p className="text-sm text-indigo-200/70 mt-3">
-                Examples: "I am someone who never misses workouts" • "I am a writer who publishes every day" • "I am an early riser who owns my mornings"
+              <p className="text-sm text-indigo-200/70 mt-4 leading-relaxed">
+                📝 <strong className="text-purple-300">Examples:</strong> "I am someone who never misses workouts" • "I am a writer who publishes every day" • "I am an early riser who owns my mornings"
               </p>
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-2xl font-bold text-amber-400">How your habits support your identity:</h3>
+              <h3 className="text-2xl font-bold text-purple-300">How your habits support your identity:</h3>
               
               {habits.map(habit => (
-                <div key={habit.id} className="bg-slate-700/30 border-2 border-amber-500/30 rounded-2xl p-5 hover:shadow-lg transition-all">
+                <div key={habit.id} className="bg-gradient-to-r from-purple-900/15 to-slate-800/40 border-2 border-purple-500/40 rounded-2xl p-6 hover:border-purple-500/60 hover:shadow-lg transition-all">
                   <div className="flex items-center gap-4">
                     {habit.completed ? (
-                      <CheckCircle className="text-emerald-400" size={28} className="fill-current" />
+                      <CheckCircle className="text-emerald-400 flex-shrink-0" size={36} className="fill-current" />
                     ) : (
-                      <Circle className="text-amber-400/50" size={28} />
+                      <Circle className="text-purple-400/50 flex-shrink-0" size={36} />
                     )}
                     <div className="flex-1">
-                      <p className="font-bold text-amber-100 text-lg">{habit.name || 'Unnamed habit'}</p>
-                      <p className="text-sm text-amber-200/70">
+                      <p className="font-bold text-indigo-100 text-lg">{habit.name || 'Unnamed habit'}</p>
+                      <p className="text-sm text-indigo-200/60 mt-1">
                         ✓ Every completion is a vote for your new identity
                       </p>
                     </div>
-                    <div className="text-center bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl p-3">
-                      <div className="text-2xl font-black text-white">{habit.streak}</div>
-                      <div className="text-xs text-white/90 font-semibold">votes cast</div>
+                    <div className="text-center bg-gradient-to-br from-purple-600/80 to-pink-600/80 rounded-2xl p-4 min-w-[100px] border border-purple-500/40 hover:border-purple-500/60 transition-all hover:shadow-lg">
+                      <div className="text-3xl font-black text-purple-50">{habit.streak}</div>
+                      <div className="text-xs text-purple-100/90 font-bold">votes cast</div>
                     </div>
                   </div>
                 </div>
               ))}
 
               {habits.length === 0 && (
-                <div className="text-center py-12 text-amber-400/50">
-                  <p>Add habits in the Habits tab to track your identity votes</p>
+                <div className="text-center py-12 text-indigo-400/50">
+                  <p className="text-lg">Add habits in the Habits tab to track your identity votes</p>
                 </div>
               )}
             </div>
 
-            <div className="mt-8 p-6 bg-gradient-to-r from-amber-900/40 to-orange-900/40 rounded-2xl border-2 border-amber-500/30">
-              <p className="text-amber-100">
-                <strong className="text-amber-400 text-lg">💡 Key Insight:</strong> Your habits embody your identity. Small wins are evidence of your new self. 
+            <div className="mt-8 p-6 bg-gradient-to-r from-purple-900/30 to-pink-900/30 rounded-2xl border-2 border-purple-500/40 hover:border-purple-500/60 transition-all">
+              <p className="text-indigo-100 leading-relaxed">
+                <strong className="text-purple-300 text-lg">💡 Key Insight:</strong> Your habits embody your identity. Small wins are evidence of your new self. 
                 The goal isn't to run a marathon; it's to become a runner. The goal isn't to write a book; it's to become a writer.
               </p>
             </div>
@@ -953,69 +1441,71 @@ const AtomicProductivityApp = () => {
 
         {/* Habit Stacking Tab */}
         {activeTab === 'stacking' && (
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+          <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 border border-indigo-500/20 backdrop-blur-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
               <div>
-                <h2 className="text-3xl font-black text-amber-400 flex items-center gap-3">
-                  <Zap className="text-amber-500" size={36} />
+                <h2 className="text-4xl font-black text-indigo-300 flex items-center gap-4 mb-3">
+                  <div className="p-3 bg-gradient-to-br from-yellow-600/30 to-orange-600/30 rounded-xl border border-yellow-500/30">
+                    <Zap className="text-yellow-400" size={32} />
+                  </div>
                   Habit Stacking
                 </h2>
-                <p className="text-amber-100/80 mt-2">Link new habits to existing ones for automatic success</p>
+                <p className="text-indigo-200/70 text-lg font-medium">Link new habits to existing ones for automatic success</p>
               </div>
               <button
                 onClick={addHabitStack}
-                className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl hover:shadow-lg transition-all font-bold"
+                className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-yellow-600 to-orange-600 text-white rounded-xl hover:shadow-xl hover:scale-105 transition-all font-bold text-lg border border-yellow-500/50 hover:border-yellow-400"
               >
                 <Plus size={20} />
                 Add Stack
               </button>
             </div>
 
-            <div className="mb-6 p-4 bg-blue-900/30 rounded-xl border-2 border-blue-500/30">
-              <p className="font-bold text-blue-300 mb-2">Formula: After [CURRENT HABIT], I will [NEW HABIT]</p>
-              <p className="text-sm text-blue-200/70">
-                Example: "After I pour my morning coffee, I will meditate for one minute"
+            <div className="mb-8 p-6 bg-gradient-to-r from-yellow-900/25 to-orange-900/25 rounded-2xl border-2 border-yellow-500/40 hover:border-yellow-500/60 transition-all">
+              <p className="font-bold text-yellow-300 mb-3 text-lg">Formula: After [CURRENT HABIT], I will [NEW HABIT]</p>
+              <p className="text-sm text-indigo-200/70 leading-relaxed">
+                💡 <strong>Example:</strong> "After I pour my morning coffee, I will meditate for one minute"
               </p>
             </div>
 
             <div className="space-y-4">
               {habitStacks.map(stack => (
-                <div key={stack.id} className="border-2 border-amber-500/30 bg-slate-700/30 rounded-2xl p-4 hover:border-amber-500/50 hover:shadow-xl transition-all">
+                <div key={stack.id} className="border-2 border-yellow-500/40 bg-gradient-to-r from-yellow-900/15 to-slate-800/40 rounded-2xl p-6 hover:border-yellow-500/60 hover:shadow-xl transition-all">
                   <div className="flex items-start gap-4">
                     <button
                       onClick={() => toggleHabitStack(stack.id)}
-                      className="text-amber-400 mt-2 hover:scale-110 transition-transform"
+                      className={`mt-1 transition-all duration-300 flex-shrink-0 ${stack.completed ? 'text-yellow-400 scale-110' : 'text-yellow-500/70 hover:text-yellow-400'}`}
                     >
-                      {stack.completed ? <CheckCircle size={28} className="fill-current" /> : <Circle size={28} />}
+                      {stack.completed ? <CheckCircle size={40} className="fill-current" /> : <Circle size={40} />}
                     </button>
 
-                    <div className="flex-1 space-y-3">
+                    <div className="flex-1 space-y-4">
                       <div>
-                        <label className="block text-sm font-bold text-amber-300 mb-2">Current Habit (Trigger)</label>
+                        <label className="block text-sm font-bold text-yellow-300 mb-2">Current Habit (Trigger)</label>
                         <input
                           type="text"
                           placeholder="After I..."
                           value={stack.trigger}
                           onChange={(e) => updateHabitStack(stack.id, 'trigger', e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-600 text-amber-100 border-2 border-amber-500/30 rounded-lg focus:outline-none focus:border-amber-500"
+                          className="w-full px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-yellow-500/30 rounded-xl focus:outline-none focus:border-yellow-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40"
                         />
                       </div>
                       
                       <div>
-                        <label className="block text-sm font-bold text-amber-300 mb-2">New Habit (Action)</label>
+                        <label className="block text-sm font-bold text-yellow-300 mb-2">New Habit (Action)</label>
                         <input
                           type="text"
                           placeholder="I will..."
                           value={stack.newHabit}
                           onChange={(e) => updateHabitStack(stack.id, 'newHabit', e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-600 text-amber-100 border-2 border-amber-500/30 rounded-lg focus:outline-none focus:border-amber-500"
+                          className="w-full px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-yellow-500/30 rounded-xl focus:outline-none focus:border-yellow-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40"
                         />
                       </div>
 
                       {stack.trigger && stack.newHabit && (
-                        <div className="p-4 bg-indigo-900/40 rounded-lg border-2 border-indigo-500/30">
-                          <p className="text-sm text-indigo-200">
-                            <strong className="text-indigo-300">Your Stack:</strong> After {stack.trigger}, I will {stack.newHabit}
+                        <div className="p-4 bg-gradient-to-r from-yellow-900/30 to-orange-900/30 rounded-xl border-2 border-yellow-500/30 hover:border-yellow-500/50 transition-all">
+                          <p className="text-sm text-indigo-100">
+                            <strong className="text-yellow-300">Your Stack:</strong> After <span className="text-yellow-200">{stack.trigger}</span>, I will <span className="text-yellow-200">{stack.newHabit}</span>
                           </p>
                         </div>
                       )}
@@ -1023,9 +1513,9 @@ const AtomicProductivityApp = () => {
 
                     <button
                       onClick={() => deleteHabitStack(stack.id)}
-                      className="text-red-400 hover:text-red-500 hover:scale-110 transition-all mt-2"
+                      className="text-red-500/70 hover:text-red-400 hover:scale-110 transition-all flex-shrink-0"
                     >
-                      <Trash2 size={20} />
+                      <Trash2 size={24} />
                     </button>
                   </div>
                 </div>
@@ -1033,16 +1523,18 @@ const AtomicProductivityApp = () => {
             </div>
 
             {habitStacks.length === 0 && (
-              <div className="text-center py-16 text-amber-400/50">
-                <Zap size={64} className="mx-auto mb-4 opacity-50" />
-                <p className="text-xl font-semibold">No habit stacks yet</p>
-                <p className="text-sm mt-2">Click "Add Stack" to link new habits!</p>
+              <div className="text-center py-16">
+                <div className="p-4 bg-yellow-900/20 rounded-full inline-block mb-4">
+                  <Zap size={64} className="text-yellow-400 opacity-70" />
+                </div>
+                <p className="text-2xl font-bold text-indigo-300 mb-2">No habit stacks yet</p>
+                <p className="text-indigo-200/70 text-lg">Click "Add Stack" to link new habits!</p>
               </div>
             )}
 
-            <div className="mt-8 p-6 bg-gradient-to-r from-purple-900/40 to-pink-900/40 rounded-2xl border-2 border-purple-500/30">
-              <p className="text-purple-100">
-                <strong className="text-purple-300 text-lg">🔗 Why Habit Stacking Works:</strong> Your current habits are already built into your brain. 
+            <div className="mt-8 p-6 bg-gradient-to-r from-yellow-900/25 to-orange-900/25 rounded-2xl border-2 border-yellow-500/40 hover:border-yellow-500/60 transition-all">
+              <p className="text-indigo-100 leading-relaxed">
+                <strong className="text-yellow-300 text-lg">🔗 Why Habit Stacking Works:</strong> Your current habits are already built into your brain. 
                 By linking new behaviors to established patterns, you make remembering and executing new habits effortless.
               </p>
             </div>
@@ -1051,56 +1543,60 @@ const AtomicProductivityApp = () => {
 
         {/* Tasks Tab */}
         {activeTab === 'tasks' && (
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
-            <h2 className="text-3xl font-black text-amber-400 mb-6 flex items-center gap-3">
-              <CheckCircle className="text-amber-500" size={36} />
+          <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 border border-indigo-500/20 backdrop-blur-sm">
+            <h2 className="text-4xl font-black text-indigo-300 mb-3 flex items-center gap-4">
+              <div className="p-3 bg-gradient-to-br from-cyan-600/30 to-teal-600/30 rounded-xl border border-cyan-500/30">
+                <CheckCircle className="text-cyan-400" size={32} />
+              </div>
               Daily Task Manager
             </h2>
             
-            <div className="flex gap-2 mb-6">
+            <div className="flex gap-3 mb-8">
               <input
                 type="text"
                 placeholder="Add a new task..."
                 value={newTask}
                 onChange={(e) => setNewTask(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && addTask()}
-                className="flex-1 px-4 py-3 bg-slate-700 text-amber-100 border-2 border-amber-500/30 rounded-xl focus:outline-none focus:border-amber-500"
+                className="flex-1 px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-cyan-500/30 rounded-xl focus:outline-none focus:border-cyan-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40 font-medium"
               />
               <button
                 onClick={addTask}
-                className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl hover:shadow-lg transition-all font-bold"
+                className="px-6 py-3 bg-gradient-to-r from-cyan-600 to-cyan-700 text-white rounded-xl hover:shadow-xl hover:scale-105 transition-all font-bold border border-cyan-500/50 hover:border-cyan-400"
               >
                 <Plus size={24} />
               </button>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               {tasks.map(task => (
-                <div key={task.id} className="flex items-center gap-3 p-4 border-2 border-amber-500/30 bg-slate-700/30 rounded-xl hover:border-amber-500/50 hover:shadow-lg transition-all">
+                <div key={task.id} className="flex items-center gap-4 p-5 border-2 border-cyan-500/40 bg-gradient-to-r from-cyan-900/15 to-slate-800/40 rounded-2xl hover:border-cyan-500/60 hover:shadow-xl transition-all">
                   <button
                     onClick={() => toggleTask(task.id)}
-                    className="text-amber-400 hover:scale-110 transition-transform"
+                    className={`transition-all duration-300 flex-shrink-0 ${task.completed ? 'text-cyan-400 scale-110' : 'text-cyan-500/70 hover:text-cyan-400'}`}
                   >
-                    {task.completed ? <CheckCircle size={28} className="fill-current" /> : <Circle size={28} />}
+                    {task.completed ? <CheckCircle size={40} className="fill-current" /> : <Circle size={40} />}
                   </button>
-                  <span className={`flex-1 text-lg ${task.completed ? 'line-through text-amber-400/50' : 'text-amber-100'}`}>
+                  <span className={`flex-1 text-lg font-medium ${task.completed ? 'line-through text-indigo-300/50' : 'text-indigo-100'}`}>
                     {task.text}
                   </span>
                   <button
                     onClick={() => deleteTask(task.id)}
-                    className="text-red-400 hover:text-red-500 hover:scale-110 transition-all"
+                    className="text-red-500/70 hover:text-red-400 hover:scale-110 transition-all flex-shrink-0"
                   >
-                    <Trash2 size={20} />
+                    <Trash2 size={24} />
                   </button>
                 </div>
               ))}
             </div>
 
             {tasks.length === 0 && (
-              <div className="text-center py-16 text-amber-400/50">
-                <CheckCircle size={64} className="mx-auto mb-4 opacity-50" />
-                <p className="text-xl font-semibold">No tasks yet</p>
-                <p className="text-sm mt-2">Add your first task above!</p>
+              <div className="text-center py-16">
+                <div className="p-4 bg-cyan-900/20 rounded-full inline-block mb-4">
+                  <CheckCircle size={64} className="text-cyan-400 opacity-70" />
+                </div>
+                <p className="text-2xl font-bold text-indigo-300 mb-2">No tasks yet</p>
+                <p className="text-indigo-200/70 text-lg">Add your first task above!</p>
               </div>
             )}
           </div>
@@ -1108,88 +1604,100 @@ const AtomicProductivityApp = () => {
 
         {/* Weekly Tab */}
         {activeTab === 'weekly' && (
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
-            <h2 className="text-3xl font-black text-amber-400 mb-6 flex items-center gap-3">
-              <Calendar className="text-amber-500" size={36} />
-              Weekly Goals & Planning
-            </h2>
-            <p className="text-amber-100/80 mb-8 text-lg">Weekly Design System: Take 30 minutes to create a plan for the week</p>
+          <div className="space-y-8">
+            {/* Current Week Goals */}
+            <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 border border-indigo-500/20 backdrop-blur-sm">
+              <h2 className="text-4xl font-black text-indigo-300 mb-3 flex items-center gap-4">
+                <div className="p-3 bg-gradient-to-br from-indigo-600/30 to-purple-600/30 rounded-xl border border-indigo-500/30">
+                  <Calendar className="text-indigo-400" size={32} />
+                </div>
+                Weekly Goals & Planning
+              </h2>
+              <p className="text-indigo-200/70 mb-8 text-lg font-medium">Weekly Design System: Take 30 minutes to create a plan for the week</p>
 
-            <div className="space-y-4">
-              {weeklyGoals.map(goal => (
-                <div key={goal.id} className="border-2 border-amber-500/30 bg-slate-700/30 rounded-2xl p-4 hover:shadow-xl transition-all">
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => toggleWeeklyGoal(goal.id)}
-                      className="text-amber-400 hover:scale-110 transition-transform"
-                    >
-                      {goal.completed ? <CheckCircle size={28} className="fill-current" /> : <Circle size={28} />}
-                    </button>
-                    
-                    <div className="flex-1 space-y-2">
-                      <select
-                        value={goal.category}
-                        onChange={(e) => updateWeeklyGoal(goal.id, 'category', e.target.value)}
-                        className="px-3 py-2 bg-slate-600 text-amber-100 border-2 border-amber-500/30 rounded-lg focus:outline-none focus:border-amber-500 text-sm font-semibold"
+              <div className="space-y-4">
+                {weeklyGoals.map(goal => (
+                  <div key={goal.id} className="border-2 border-indigo-500/40 bg-gradient-to-r from-indigo-900/15 to-slate-800/40 rounded-2xl p-6 hover:border-indigo-500/60 hover:shadow-xl transition-all">
+                    <div className="flex items-start gap-4">
+                      <button
+                        onClick={() => toggleWeeklyGoal(goal.id)}
+                        className={`transition-all duration-300 flex-shrink-0 ${goal.completed ? 'text-indigo-400 scale-110' : 'text-indigo-500/70 hover:text-indigo-400'}`}
                       >
-                        <option>Health</option>
-                        <option>Career</option>
-                        <option>Personal</option>
-                        <option>Relationships</option>
-                        <option>Finance</option>
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="What's your goal for this week?"
-                        value={goal.goal}
-                        onChange={(e) => updateWeeklyGoal(goal.id, 'goal', e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-600 text-amber-100 border-2 border-amber-500/30 rounded-lg focus:outline-none focus:border-amber-500"
-                      />
+                        {goal.completed ? <CheckCircle size={40} className="fill-current" /> : <Circle size={40} />}
+                      </button>
+                      
+                      <div className="flex-1 space-y-3">
+                        <select
+                          value={goal.category}
+                          onChange={(e) => updateWeeklyGoal(goal.id, 'category', e.target.value)}
+                          className="px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-indigo-500/30 rounded-xl focus:outline-none focus:border-indigo-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 text-sm font-semibold"
+                        >
+                          <option>Health</option>
+                          <option>Career</option>
+                          <option>Personal</option>
+                          <option>Relationships</option>
+                          <option>Finance</option>
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="What's your goal for this week?"
+                          value={goal.goal}
+                          onChange={(e) => updateWeeklyGoal(goal.id, 'goal', e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-indigo-500/30 rounded-xl focus:outline-none focus:border-indigo-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 placeholder-indigo-300/40 font-medium"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+
+              <button
+                onClick={() => setWeeklyGoals([...weeklyGoals, { id: Date.now(), goal: '', category: 'Personal', completed: false }])}
+                className="mt-8 flex items-center gap-2 px-5 py-3 border-2 border-dashed border-indigo-500/40 text-indigo-300 rounded-xl hover:bg-indigo-900/20 hover:border-indigo-500/60 transition-all w-full justify-center font-bold text-lg hover:shadow-lg"
+              >
+                <Plus size={20} />
+                Add Weekly Goal
+              </button>
             </div>
 
-            <button
-              onClick={() => setWeeklyGoals([...weeklyGoals, { id: Date.now(), goal: '', category: 'Personal', completed: false }])}
-              className="mt-6 flex items-center gap-2 px-4 py-3 border-2 border-dashed border-amber-500/30 text-amber-400 rounded-xl hover:bg-slate-700/30 hover:border-amber-500/50 transition-all w-full justify-center font-bold"
-            >
-              <Plus size={20} />
-              Add Weekly Goal
-            </button>
+            {/* Completed Goals History */}
+            <WeeklyGoalsHistory getMonthsArchiveData={getMonthsArchiveData} />
           </div>
         )}
 
         {/* Gratitude Tab */}
         {activeTab === 'gratitude' && (
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 border border-amber-500/20">
-            <h2 className="text-3xl font-black text-amber-400 mb-6 flex items-center gap-3">
-              <Heart className="text-pink-500" size={36} />
+          <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 rounded-3xl shadow-2xl p-8 border border-indigo-500/20 backdrop-blur-sm">
+            <h2 className="text-4xl font-black text-indigo-300 mb-3 flex items-center gap-4">
+              <div className="p-3 bg-gradient-to-br from-pink-600/30 to-rose-600/30 rounded-xl border border-pink-500/30">
+                <Heart className="text-pink-400" size={32} />
+              </div>
               Gratitude Journal
             </h2>
-            <p className="text-amber-100/80 mb-8 text-lg">Write three things you're grateful for today. Shift your mindset and increase happiness.</p>
+            <p className="text-indigo-200/70 mb-8 text-lg font-medium">Write three things you're grateful for today. Shift your mindset and increase happiness.</p>
 
             <div className="space-y-6">
               {gratitude.map((item, index) => (
-                <div key={index} className="border-2 border-pink-500/50 rounded-2xl p-6 bg-gradient-to-br from-pink-900/30 to-slate-800/50 hover:shadow-xl transition-all">
-                  <label className="block text-lg font-bold text-pink-300 mb-3 flex items-center gap-2">
-                    <Heart size={20} className="fill-current" />
+                <div key={index} className="border-2 border-pink-500/40 rounded-2xl p-6 bg-gradient-to-br from-pink-900/20 to-slate-800/40 hover:border-pink-500/60 hover:shadow-xl transition-all">
+                  <label className="block text-lg font-bold text-pink-300 mb-4 flex items-center gap-3">
+                    <div className="p-2 bg-pink-600/30 rounded-lg">
+                      <Heart size={20} className="fill-current text-pink-400" />
+                    </div>
                     I'm grateful for #{index + 1}
                   </label>
                   <textarea
                     value={item}
                     onChange={(e) => updateGratitude(index, e.target.value)}
                     placeholder="What are you grateful for today?"
-                    className="w-full px-4 py-3 bg-slate-700 text-amber-100 border-2 border-pink-500/30 rounded-xl focus:outline-none focus:border-pink-500 resize-none"
+                    className="w-full px-4 py-3 bg-slate-700/50 text-indigo-100 border-2 border-pink-500/30 rounded-xl focus:outline-none focus:border-pink-400 focus:bg-slate-700 transition-all hover:bg-slate-700/70 resize-none placeholder-indigo-300/40 font-medium"
                     rows="3"
                   />
                 </div>
               ))}
             </div>
 
-            <div className="mt-8 p-6 bg-gradient-to-r from-pink-900/40 to-purple-900/40 rounded-2xl border-2 border-pink-500/30">
-              <p className="text-pink-100">
+            <div className="mt-8 p-6 bg-gradient-to-r from-pink-900/25 to-rose-900/25 rounded-2xl border-2 border-pink-500/40 hover:border-pink-500/60 transition-all">
+              <p className="text-indigo-100 leading-relaxed">
                 <strong className="text-pink-300 text-lg">💝 Daily Gratitude Practice:</strong> Research shows that practicing gratitude increases happiness, 
                 reduces stress, and improves sleep quality. Make it part of your morning reflection time.
               </p>
@@ -1199,7 +1707,7 @@ const AtomicProductivityApp = () => {
       </div>
       
       {/* Footer */}
-      <div className="mt-8 text-center text-amber-400/50 text-sm">
+      <div className="mt-8 text-center text-indigo-400/50 text-sm">
         <p>Built with ❤️ for early risers and habit builders worldwide 🌅</p>
       </div>
     </div>
