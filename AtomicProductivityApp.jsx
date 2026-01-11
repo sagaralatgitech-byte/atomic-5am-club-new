@@ -763,7 +763,181 @@ const AtomicProductivityApp = () => {
     });
   };
 
-  // Sync time blocks to Google Calendar
+  // Generate ICS format event string
+  const generateICSEvent = (summary, description, startDateTime, endDateTime, reminders = []) => {
+    // Format datetime for ICS (YYYYMMDDTHHmmssZ)
+    const formatICSDateTime = (dateStr, timeStr) => {
+      const date = new Date(dateStr);
+      const [time, period] = timeStr.split(' ');
+      let [hours, minutes] = time.split(':').map(Number);
+      
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      
+      date.setHours(hours, minutes, 0);
+      
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      const h = String(date.getUTCHours()).padStart(2, '0');
+      const m = String(date.getUTCMinutes()).padStart(2, '0');
+      const s = String(date.getUTCSeconds()).padStart(2, '0');
+      
+      return `${year}${month}${day}T${h}${m}${s}Z`;
+    };
+
+    const dtstart = formatICSDateTime(startDateTime.date, startDateTime.time);
+    const dtend = formatICSDateTime(endDateTime.date, endDateTime.time);
+    
+    // Create UID based on summary and time
+    const uid = `atomic-${summary.replace(/\s+/g, '-').toLowerCase()}-${dtstart}@atomicclub`;
+    
+    // Escape special characters in description
+    const escapedDescription = description.replace(/\n/g, '\\n').replace(/"/g, '\\"');
+    const escapedSummary = summary.replace(/"/g, '\\"');
+
+    let event = `BEGIN:VEVENT
+UID:${uid}
+DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}Z
+DTSTART:${dtstart}
+DTEND:${dtend}
+SUMMARY:${escapedSummary}
+DESCRIPTION:${escapedDescription}`;
+
+    // Add reminders/alarms
+    if (reminders.length > 0) {
+      reminders.forEach(reminder => {
+        event += `
+BEGIN:VALARM
+TRIGGER:-PT${reminder}M
+ACTION:DISPLAY
+DESCRIPTION:${escapedSummary}
+END:VALARM`;
+      });
+    }
+
+    event += `
+END:VEVENT`;
+    
+    return event;
+  };
+
+  // Export schedule to ICS file
+  const exportToICS = () => {
+    try {
+      if (timeBlocks.length === 0) {
+        alert('⚠️ No time blocks added yet. Please add activities first!');
+        return;
+      }
+
+      const events = [];
+      
+      // Add Victory Hour event
+      if (morningRoutine.move.activity || morningRoutine.reflect.activity || morningRoutine.grow.activity) {
+        const victoryDescription = `MOVE (5:00-5:20 AM): ${morningRoutine.move.activity || 'Not specified'}\nREFLECT (5:20-5:40 AM): ${morningRoutine.reflect.activity || 'Not specified'}\nGROW (5:40-6:00 AM): ${morningRoutine.grow.activity || 'Not specified'}`;
+        
+        events.push(generateICSEvent(
+          '🌅 Victory Hour - 20/20/20 Formula',
+          victoryDescription,
+          { date: currentDate, time: '5:00 AM' },
+          { date: currentDate, time: '6:00 AM' },
+          [15] // 15 minute reminder
+        ));
+      }
+
+      // Add time block events
+      for (const block of timeBlocks) {
+        if (block.activity && block.time) {
+          const startTime = block.time;
+          
+          // Calculate end time
+          let [hours, minutes] = startTime.split(':').map(s => s.trim());
+          minutes = minutes.split(' ')[0];
+          let period = startTime.split(' ')[1];
+          
+          let startHours = parseInt(hours);
+          let startMinutes = parseInt(minutes);
+          
+          if (period === 'PM' && startHours !== 12) startHours += 12;
+          if (period === 'AM' && startHours === 12) startHours = 0;
+          
+          let endHours = startHours + Math.floor(block.duration / 60);
+          let endMinutes = startMinutes + (block.duration % 60);
+          
+          if (endMinutes >= 60) {
+            endHours += 1;
+            endMinutes -= 60;
+          }
+          
+          // Handle day overflow
+          let endDate = currentDate;
+          if (endHours >= 24) {
+            const nextDate = new Date(currentDate);
+            nextDate.setDate(nextDate.getDate() + 1);
+            endDate = nextDate.toISOString().split('T')[0];
+            endHours -= 24;
+          }
+          
+          const endPeriod = endHours >= 12 ? 'PM' : 'AM';
+          const displayHours = endHours % 12 || 12;
+          const endTime = `${displayHours}:${String(endMinutes).padStart(2, '0')} ${endPeriod}`;
+
+          const categoryEmojis = {
+            'morning': '🌅',
+            'deep-work': '🎯',
+            'work': '💼',
+            'break': '🌿',
+            'exercise': '💪',
+            'learning': '📚',
+            'personal': '❤️'
+          };
+
+          const eventSummary = `${categoryEmojis[block.category] || '📌'} ${block.activity}`;
+          const eventDescription = `Category: ${block.category.toUpperCase()}\nDuration: ${block.duration} minutes`;
+
+          events.push(generateICSEvent(
+            eventSummary,
+            eventDescription,
+            { date: currentDate, time: startTime },
+            { date: endDate, time: endTime },
+            [10] // 10 minute reminder
+          ));
+        }
+      }
+
+      if (events.length === 0) {
+        alert('⚠️ No events to export. Please add time blocks first.');
+        return;
+      }
+
+      // Build ICS file content
+      const icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Atomic 5 AM Club//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:Atomic 5 AM Club - ${currentDate}
+X-WR-CALDESC:Daily schedule for Atomic 5 AM Club
+X-WR-TIMEZONE:UTC
+${events.join('\n')}
+END:VCALENDAR`;
+
+      // Create blob and download
+      const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `atomic-schedule-${currentDate}.ics`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+
+      alert(`✅ Schedule exported! Downloaded: atomic-schedule-${currentDate}.ics\n\nNext steps:\n1. Open the downloaded file\n2. Import into Google Calendar, Outlook, Apple Calendar, or any calendar app\n3. You'll get notifications for all events!`);
+    } catch (error) {
+      console.error('Error exporting to ICS:', error);
+      alert(`❌ Error exporting schedule: ${error.message}`);
+    }
+  };
+
+  // Sync time blocks to Google Calendar (Legacy - kept for reference)
   const syncToGoogleCalendar = async () => {
     try {
       const isInitialized = await initializeGoogleCalendar();
@@ -885,8 +1059,8 @@ const AtomicProductivityApp = () => {
     }
   };
 
-  const exportToGoogleCalendar = async () => {
-    await syncToGoogleCalendar();
+  const exportToGoogleCalendar = () => {
+    exportToICS();
   };
 
   if (loading) {
@@ -1155,7 +1329,7 @@ const AtomicProductivityApp = () => {
                   className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-xl hover:scale-105 transition-all font-bold text-lg border border-purple-500/50 hover:border-purple-400"
                 >
                   <Download size={20} />
-                  Export
+                  Export to ICS
                 </button>
               </div>
             </div>
@@ -1167,14 +1341,15 @@ const AtomicProductivityApp = () => {
                   <Bell className="text-blue-400" size={24} />
                 </div>
                 <div className="text-sm text-indigo-100">
-                  <p className="font-bold mb-3 text-lg text-blue-300">📱 Get Phone Alerts:</p>
+                  <p className="font-bold mb-3 text-lg text-blue-300">� Export & Import to Your Calendar:</p>
                   <ol className="list-decimal ml-5 space-y-2 text-indigo-200/80">
                     <li>Fill in your time blocks below</li>
-                    <li>Click "Export" to download .ics file</li>
-                    <li>Open file on your phone to import to Google Calendar</li>
-                    <li>Enable notifications in calendar settings</li>
-                    <li>Get alerts 10-15 minutes before each block!</li>
+                    <li>Click "Export to ICS" to download the calendar file</li>
+                    <li>Open the downloaded .ics file or import it into your calendar app</li>
+                    <li>Works with Google Calendar, Outlook, Apple Calendar, or any calendar app!</li>
+                    <li>Enable notifications in your calendar - get alerts 10-15 minutes before each event!</li>
                   </ol>
+                  <p className="text-xs text-blue-300/80 mt-3 italic">💡 The ICS format is universal - compatible with any calendar service you use!</p>
                 </div>
               </div>
             </div>
@@ -1405,7 +1580,7 @@ const AtomicProductivityApp = () => {
                 <div key={habit.id} className="bg-gradient-to-r from-purple-900/15 to-slate-800/40 border-2 border-purple-500/40 rounded-2xl p-6 hover:border-purple-500/60 hover:shadow-lg transition-all">
                   <div className="flex items-center gap-4">
                     {habit.completed ? (
-                      <CheckCircle className="text-emerald-400 flex-shrink-0" size={36} className="fill-current" />
+                      <CheckCircle className="text-emerald-400 flex-shrink-0 fill-current" size={36} />
                     ) : (
                       <Circle className="text-purple-400/50 flex-shrink-0" size={36} />
                     )}
