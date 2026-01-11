@@ -744,24 +744,7 @@ const AtomicProductivityApp = () => {
     return colors[category] || 'bg-gradient-to-br from-gray-100 to-slate-100 border-gray-300 text-gray-900';
   };
 
-  // Initialize Google Calendar API
-  const initializeGoogleCalendar = async () => {
-    return new Promise((resolve) => {
-      window.gapi.load('client:auth2', () => {
-        window.gapi.client.init({
-          apiKey: process.env.REACT_APP_GOOGLE_API_KEY,
-          clientId: process.env.REACT_APP_GOOGLE_CLIENT_ID,
-          scope: 'https://www.googleapis.com/auth/calendar',
-          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest']
-        }).then(() => {
-          resolve(true);
-        }).catch((error) => {
-          console.error('Google Calendar initialization failed:', error);
-          resolve(false);
-        });
-      });
-    });
-  };
+
 
   // Generate ICS format event string
   const generateICSEvent = (summary, description, startDateTime, endDateTime, reminders = []) => {
@@ -937,127 +920,7 @@ END:VCALENDAR`;
     }
   };
 
-  // Sync time blocks to Google Calendar (Legacy - kept for reference)
-  const syncToGoogleCalendar = async () => {
-    try {
-      const isInitialized = await initializeGoogleCalendar();
-      if (!isInitialized) {
-        alert('❌ Unable to initialize Google Calendar. Please check your API credentials.');
-        return;
-      }
 
-      const auth2 = window.gapi.auth2.getAuthInstance();
-      if (!auth2 || !auth2.isSignedIn.get()) {
-        // Sign in if not already signed in
-        await auth2.signIn();
-      }
-
-      let eventsCreated = 0;
-      let eventsFailed = 0;
-
-      // Create Victory Hour event
-      if (morningRoutine.move.activity || morningRoutine.reflect.activity || morningRoutine.grow.activity) {
-        const victoryHourEvent = {
-          summary: '🌅 Victory Hour - 20/20/20 Formula',
-          description: `MOVE (5:00-5:20 AM): ${morningRoutine.move.activity || 'Not specified'}\nREFLECT (5:20-5:40 AM): ${morningRoutine.reflect.activity || 'Not specified'}\nGROW (5:40-6:00 AM): ${morningRoutine.grow.activity || 'Not specified'}`,
-          start: {
-            dateTime: `${currentDate}T05:00:00`,
-            timeZone: 'UTC'
-          },
-          end: {
-            dateTime: `${currentDate}T06:00:00`,
-            timeZone: 'UTC'
-          },
-          reminders: {
-            useDefault: false,
-            overrides: [
-              { method: 'notification', minutes: 15 }
-            ]
-          }
-        };
-
-        try {
-          await window.gapi.client.calendar.events.insert({
-            calendarId: 'primary',
-            resource: victoryHourEvent
-          });
-          eventsCreated++;
-        } catch (error) {
-          console.error('Failed to create Victory Hour event:', error);
-          eventsFailed++;
-        }
-      }
-
-      // Create time block events
-      for (const block of timeBlocks) {
-        if (block.activity && block.time) {
-          const timeMatch = block.time.match(/(\d+):(\d+)\s*(AM|PM)/i);
-          if (timeMatch) {
-            let [, hours, minutes, period] = timeMatch;
-            hours = parseInt(hours);
-
-            if (period.toUpperCase() === 'PM' && hours !== 12) hours += 12;
-            if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
-
-            const startTime = `${currentDate}T${hours.toString().padStart(2, '0')}:${minutes}:00`;
-            const endHour = hours + Math.floor(block.duration / 60);
-            const endMinutes = (parseInt(minutes) + (block.duration % 60)) % 60;
-            const endTime = `${currentDate}T${endHour.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00`;
-
-            const categoryEmojis = {
-              'morning': '🌅',
-              'deep-work': '🎯',
-              'work': '💼',
-              'break': '🌿',
-              'exercise': '💪',
-              'learning': '📚',
-              'personal': '❤️'
-            };
-
-            const timeBlockEvent = {
-              summary: `${categoryEmojis[block.category] || '📌'} ${block.activity}`,
-              description: `Category: ${block.category.toUpperCase()}\nDuration: ${block.duration} minutes`,
-              start: {
-                dateTime: startTime,
-                timeZone: 'UTC'
-              },
-              end: {
-                dateTime: endTime,
-                timeZone: 'UTC'
-              },
-              reminders: {
-                useDefault: false,
-                overrides: [
-                  { method: 'notification', minutes: 10 }
-                ]
-              }
-            };
-
-            try {
-              await window.gapi.client.calendar.events.insert({
-                calendarId: 'primary',
-                resource: timeBlockEvent
-              });
-              eventsCreated++;
-            } catch (error) {
-              console.error(`Failed to create event for ${block.activity}:`, error);
-              eventsFailed++;
-            }
-          }
-        }
-      }
-
-      // Show result
-      if (eventsCreated > 0) {
-        alert(`✅ Calendar synced! ${eventsCreated} event(s) created.\n${eventsFailed > 0 ? `⚠️ ${eventsFailed} event(s) failed to create.` : ''}`);
-      } else {
-        alert('⚠️ No events created. Please add time blocks and activities first.');
-      }
-    } catch (error) {
-      console.error('Error syncing to Google Calendar:', error);
-      alert(`❌ Error syncing to Google Calendar: ${error.message}`);
-    }
-  };
 
   const exportToGoogleCalendar = () => {
     exportToICS();
